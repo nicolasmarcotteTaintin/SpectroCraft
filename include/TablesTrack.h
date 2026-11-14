@@ -123,7 +123,9 @@ private:
     juce::Point<int> hoverPos {-1, -1};
     std::vector<HoverLabel> hoverLabels;
 
-    static constexpr int kAxisW = kLeftAxisWidth;   // same vertical-axis width as the data tracks
+    /** Vertical-axis strip width: shared with the waveform and the
+        spectrogram (the widest of the three axis label sets wins). */
+    int axisW() const { return app.axisStripWidth(); }
 
     JUCE_DECLARE_NON_COPYABLE (TablesTrackView)
 };

@@ -428,10 +428,10 @@ static void dockTest_workspaces()
 
         // Modify Default, visit Analysis, come back: Default kept its change.
         {
-            const auto tl = dock.locate ("files");
+            const auto tl = dock.locate ("tables");
             dock.movePanel ("markers", *tl.area, tl.group->uid, Z::tabStrip, 0);
         }
-        const auto modified = win->panelGroupTitles ("files");
+        const auto modified = win->panelGroupTitles ("tables");
         win->switchWorkspace ("analysis");
         {
             auto* fftG = dockGroupOf (dock, "fft");
@@ -441,10 +441,10 @@ static void dockTest_workspaces()
                    "workspaces: Analysis puts Frequency Analysis beside the Editor");
         }
         win->switchWorkspace ("default");
-        CHECK (win->panelGroupTitles ("files") == modified, "workspaces: a workspace keeps its modifications");
+        CHECK (win->panelGroupTitles ("tables") == modified, "workspaces: a workspace keeps its modifications");
         win->resetWorkspace ();
         CHECK (win->panelGroupTitles ("controls").contains ("Markers")
-                   && ! win->panelGroupTitles ("files").contains ("Markers"),
+                   && ! win->panelGroupTitles ("tables").contains ("Markers"),
                "workspaces: Reset to Saved Layout");
 
         // Save as New Workspace: a user workspace, active, with this layout.
@@ -503,7 +503,10 @@ static void dockTest_legacyLayout()
     store.deleteFile ();
     {
         juce::PropertiesFile pf (store, juce::PropertiesFile::Options ());
-        pf.setValue ("left_tab_layout", "fft;files|controls;markers");
+        // A layout saved by an older version: it still names the Files panel,
+        // which no longer exists. The unknown id is dropped, the rest of the
+        // order is kept.
+        pf.setValue ("left_tab_layout", "fft;actions|controls;markers");
         pf.setValue ("left_panels_closed", "history;drawing");
         pf.setValue ("left_panel_w", 560);
         pf.setValue ("top_ratio_mil", 300);
@@ -514,8 +517,8 @@ static void dockTest_legacyLayout()
     std::unique_ptr<MainWindow> win (new MainWindow (app, "legacy layout test"));
     auto& dock = win->dockManager ();
     const auto top = win->panelGroupTitles ("fft");
-    CHECK (top.size () >= 2 && top[0] == "Frequency Analysis" && top[1] == "Files",
-           "legacy: the top group keeps its tab order");
+    CHECK (top.size () >= 2 && top[0] == "Frequency Analysis" && top[1] == "Actions",
+           "legacy: the top group keeps its tab order (History was closed there)");
     CHECK (win->panelGroupTitles ("controls").size () >= 2 && win->panelGroupTitles ("controls")[0] == "Spectral Controls"
                && win->panelGroupTitles ("controls")[1] == "Markers",
            "legacy: the bottom group keeps its tab order");
@@ -888,7 +891,7 @@ static void dockTest_editorTabsPerDocument()
         CHECK (app.doc () != nullptr && app.doc ()->id == idA && viewsIn ("editor"),
                "editor tabs: clicking a tab makes its file the active one");
 
-        // Switching files another way (Files panel, Ctrl+Tab) shows its tab.
+        // Switching files another way (Tables panel, Ctrl+Tab) shows its tab.
         app.activate (indexOfDoc (idB));
         CHECK (activeTabOfGroup ("editor") == tabB && viewsIn (tabB), "editor tabs: switching files shows its tab");
 

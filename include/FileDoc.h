@@ -80,7 +80,15 @@ public:
         configuration only after it was configured at least once per open;
         otherwise it opens the configuration window first (no split). */
     bool splitConfigured = false;
-    ScaleCalibration scale;            // physical-unit calibration (Set Unit and Scale menu)
+    ScaleCalibration scale;            // physical-unit calibration (Scale form, Amplitude column)
+
+    /** Axis entries of this file (the Scale form): time / amplitude / frequency
+        axes with their units, offset, scale, visibility and order. The session's
+        display state is derived from them (sc::axes::applyEntries), and they are
+        persisted with the file's metadata bundle. Empty = the built-in defaults
+        (or, when the file has legacy calibration / alternative references, those
+        migrated to entries - see Application::axesOf). */
+    std::vector<sc::axes::Entry> axes;
 
     /** Raw payload of the source file's "bkdk" RIFF chunk, kept so WAV
         saves can preserve it byte-for-byte. Empty when the source had none.

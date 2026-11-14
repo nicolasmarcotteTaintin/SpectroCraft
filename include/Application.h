@@ -192,12 +192,18 @@ public:
     // clicked it; tracks playback while playing).
     double playhead = 0.0;
 
-    // ---- Axis scale modes (right-click "Scale" menu; session-only) ----
+    // ---- Axis scale modes (the Scale form; per-file, see sc::axes) ----
+    /** The document's axis entries: the source of truth of the Scale form.
+        applyEntries() keeps the fields below in step with the primary entry of
+        each kind, so the views keep reading the state they always used. */
+    sc::axes::List axisEntries;
     TimeAxisMode timeAxisMode = TimeAxisMode::Time;
-    double timeOffsetSecs = 0.0;   // displayed(t) = t + offset (TimeOffset mode)
+    double timeOffsetSecs = 0.0;   // displayed(t) = (t + offset) * scale
+    double timeScaleFactor = 1.0;  // extra multiplier of the time axis
     int waveVScaleMode = 0;        // waveform vertical axis: 0=Wav Units, 1=dB, 2=Normalized
     int specFreqScaleMode = 0;     // spectrogram frequency axis: 0=Hz, 1=Custom
     double specFreqFactor = 1.0;   // displayed(f) = f * factor (Custom mode)
+    int specFreqUnits = 0;         // 0=Hz, 1=% of Nyquist, 2=bare numbers
 
     // Alternative scale overlays (spectrogram right-click "Alternative Scale").
     // Any number of reference points per axis; each is a linear rescale
@@ -239,33 +245,43 @@ public:
 
     // Armed reference-click flow: which calibration is waiting for a plot
     // click (the spectral view draws the circle once the point is placed).
-    enum class RefClickTarget : int { None = 0, SpecFreqCustom, AltTime, AltFreq };
+    /* Which scale calibration a placed reference point belongs to. The two
+       Axis* targets come from the Scale form's crosshair buttons: the value
+       typed at the placed point becomes that axis entry's scale. */
+    enum class RefClickTarget : int
+    { None = 0, SpecFreqCustom, AltTime, AltFreq, WaveAmplitude, AxisFrequency };
     RefClickTarget refClickTarget = RefClickTarget::None;
     bool haveRefClickPt = false;
     double refClickT = 0.0, refClickF = 0.0;
 
     /** Displayed time value for the active time-axis mode:
-        Time -> seconds, TimeOffset -> seconds + offset, Sample -> sample count. */
+        Time -> seconds, TimeOffset -> seconds + offset, Sample -> sample count.
+        Every mode carries the entry's offset and scale. */
     double timeToDisplay (double t)
     {
+        double v = t + timeOffsetSecs;
         switch (timeAxisMode)
         {
-            case TimeAxisMode::TimeOffset: return t + timeOffsetSecs;
             case TimeAxisMode::Sample:
-                return t * std::max (1.0, audioEngine().sampleRate());
-            default:                       return t;
+                return v * std::max (1.0, audioEngine().sampleRate());
+            default:
+                return v * (timeScaleFactor != 0.0 ? timeScaleFactor : 1.0);
         }
     }
     /** Inverse of timeToDisplay(): displayed value -> real seconds. */
     double displayToTime (double v)
     {
+        double u = v;
         switch (timeAxisMode)
         {
-            case TimeAxisMode::TimeOffset: return v - timeOffsetSecs;
             case TimeAxisMode::Sample:
-                return v / std::max (1.0, audioEngine().sampleRate());
-            default:                       return v;
+                u = v / std::max (1.0, audioEngine().sampleRate());
+                break;
+            default:
+                u = v / (timeScaleFactor != 0.0 ? timeScaleFactor : 1.0);
+                break;
         }
+        return u - timeOffsetSecs;
     }
 
     std::vector<int> visibleChannels;   // sorted list of visible channel indices (any subset)
@@ -432,6 +448,27 @@ public:
         (unified metadata). Call after any change to those settings. */
     void pushActiveDocMetaTo (FileDoc& d);
     void pushActiveDocMeta();   // same, for the active document
+
+    // ---- Scale form: the document's axis entries -------------------------
+    /** Replaces the active document's axis entries: applies them to the
+        session (sc::axes::applyEntries), records one undoable step whose
+        description the History tab shows, and marks the metadata dirty so the
+        entries are written with the file. Without a document the entries are
+        applied to the session only (no history, no persistence). */
+    bool setAxisEntries (const sc::axes::List& next, const juce::String& description,
+                         std::string* errOut = nullptr);
+    /** Re-applies the current entries to the session state (after a document
+        switch, an undo, or a channel-count change). */
+    void applyAxisEntries();
+    /** The entries of a document, or the built-in defaults when it has none. */
+    static sc::axes::List axesOf (const FileDoc& d);
+
+    /** Horizontal space every track reserves for its vertical axes: the widest
+        one wins, the others get empty space (see sc::axes::axisStripWidth). */
+    int axisStripWidth() const;
+    /** Height of the time-ruler stack: the normal ruler plus one narrower
+        strip per extra visible time axis. */
+    int rulerStackHeight() const;
 
     /** Switches the active document's metadata storage mode and migrates the
         data on disk: external -> embedded inserts CUE/ADTL/SCTT/SCMD chunks

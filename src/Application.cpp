@@ -656,6 +656,14 @@ void Application::activate (int index)
         altFreqRefs.push_back (a);
     }
 
+    // Axis entries of this file (its stored ones, or rebuilt from the legacy
+    // calibration / alternative references it carries), applied to the session:
+    // the Scale form and every axis label of the tracks follow the document.
+    axisEntries = axesOf (*d);
+    if (d->axes.empty())
+        d->axes = axisEntries;
+    sc::axes::applyEntries (*this, axisEntries);
+
     // Restore this doc's remembered time window (full file when it never
     // zoomed, or the saved range no longer fits after a length-changing edit).
     const double dur = std::max (d->engine.duration(), 1e-6);
@@ -739,8 +747,93 @@ void Application::inheritSessionMeta (FileDoc& d)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Axis entries (the Scale form)
+// ---------------------------------------------------------------------------
+
+sc::axes::List Application::axesOf (const FileDoc& d)
+{
+    if (! d.axes.empty())
+        return d.axes;
+
+    // A file written before the Scale form: rebuild the entries from what it
+    // does carry (calibration, alternative references, custom frequency units)
+    // so nothing is lost, and fall back to the built-in defaults otherwise.
+    sc::axes::Legacy lg;
+    lg.scale = d.scale;
+    lg.specFreqScaleMode = d.altRef.freqScaleMode;
+    lg.specFreqFactor    = d.altRef.freqFactor;
+    for (const auto& r : d.altRef.altTimeRefs)
+        lg.altTime.push_back ({ r.name, { r.refMain, r.altValue } });
+    for (const auto& r : d.altRef.altFreqRefs)
+        lg.altFreq.push_back ({ r.name, { r.refMain, r.altValue } });
+
+    bool hadLegacy = false;
+    auto migrated = sc::axes::migrateLegacy (lg, hadLegacy);
+    return hadLegacy ? migrated : sc::axes::defaults();
+}
+
+void Application::applyAxisEntries()
+{
+    if (axisEntries.empty())
+        axisEntries = sc::axes::defaults();
+    sc::axes::applyEntries (*this, axisEntries);
+}
+
+bool Application::setAxisEntries (const sc::axes::List& next, const juce::String& description,
+                                  std::string* errOut)
+{
+    if (next.empty())
+    {
+        if (errOut) *errOut = "no axis entries";
+        return false;
+    }
+
+    FileDoc* d = doc();
+    if (d == nullptr)
+    {
+        // No document: the form still drives the (empty) views, with no
+        // history and nothing to persist.
+        axisEntries = next;
+        sc::axes::applyEntries (*this, axisEntries);
+        return true;
+    }
+
+    const auto previous = axisEntries;
+    axisEntries = next;
+    d->axes     = next;
+    sc::axes::applyEntries (*this, axisEntries);
+    pushActiveDocMetaTo (*d);   // keeps the legacy fields in step for older versions
+
+    // One undoable step. It changes no audio: the patch carries only the axis
+    // state before and after, which is what the History tab shows and what
+    // undo/redo restores.
+    Patch p;
+    p.description = description.isEmpty() ? "Changed Axis Scale" : description;
+    p.hasAxisState = true;
+    p.oldAxes = previous;
+    p.newAxes = axisEntries;
+    d->undo.record (std::move (p));
+    d->metaDirty = true;
+    return true;
+}
+
+int Application::axisStripWidth() const
+{
+    return sc::axes::axisStripWidth (*this);
+}
+
+int Application::rulerStackHeight() const
+{
+    return sc::axes::rulerStackHeight (*this);
+}
+
 void Application::pushActiveDocMetaTo (FileDoc& d)
 {
+    // The axis entries are the document's own state: they carry the units,
+    // offset, scale, order and visibility of every axis of the tracks.
+    d.axes = axisEntries;
+
     sc::FreqAnalysisState fa;
     fa.axisMode = std::clamp (settings.fftAxisMode, 0, 5);
     fa.fftSize  = std::clamp (settings.fftLocalN, 1024, 65536);
@@ -4717,7 +4810,7 @@ void Application::undoSteps (int n)
             control ().noteClearReason (d->id, "undo failed");   // journaled by pollDocuments
             break;
         }
-        if (p.hasSideState) restorePatchSideState (d, p, false);
+        if (p.hasSideState || p.hasAxisState) restorePatchSideState (d, p, false);
         ++done;
     }
     if (done > 0)
@@ -4751,7 +4844,7 @@ void Application::redoSteps (int n)
             control ().noteClearReason (d->id, "redo failed");
             break;
         }
-        if (p.hasSideState) restorePatchSideState (d, p, true);
+        if (p.hasSideState || p.hasAxisState) restorePatchSideState (d, p, true);
         ++done;
     }
     if (done > 0)
@@ -4789,6 +4882,15 @@ void Application::syncVisibleChannelsToEngine (int chBefore)
 // through onPatchSideStateRestored because it is owned by MainWindow.
 void Application::restorePatchSideState (FileDoc* d, const Patch& p, bool isRedo)
 {
+    if (p.hasAxisState)
+    {
+        // An edit of the Scale form: restore the axis entries and re-derive
+        // the session's display state from them.
+        d->axes     = isRedo ? p.newAxes : p.oldAxes;
+        axisEntries = d->axes;
+        sc::axes::applyEntries (*this, axisEntries);
+    }
+
     d->markers.restore (isRedo ? p.newMarkers : p.oldMarkers);
     d->savedSelections = isRedo ? p.newSavedSel : p.oldSavedSel;
 

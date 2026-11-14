@@ -6,6 +6,7 @@
 #include "Envelope.h"
 #include "PythonScripts.h"
 #include "Measures.h"   // headless spectrum / 1/3-octave / curve computations
+#include "SplitterStyle.h"   // the shared 6 px separator bar with its 3-line grip
 
 #include <array>
 #include <atomic>
@@ -35,22 +36,7 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (juce::Colour::fromRGB (40, 40, 44));
-        g.setColour (juce::Colour::fromRGB (110, 110, 120));
-        if (!vertical)
-        {
-            const float cx = getWidth() * 0.5f;
-            const float y1 = getHeight() * 0.30f, y2 = getHeight() * 0.70f;
-            for (int i = -1; i <= 1; ++i)
-                g.drawVerticalLine (cx + i * 3.0f, y1, y2);
-        }
-        else
-        {
-            const float cy = getHeight() * 0.5f;
-            const float x1 = getWidth() * 0.30f, x2 = getWidth() * 0.70f;
-            for (int i = -1; i <= 1; ++i)
-                g.drawHorizontalLine (cy + i * 3.0f, x1, x2);
-        }
+        sc::ui::drawSplitterGrip (g, getLocalBounds().toFloat(), vertical);
     }
 
     // The resize arrow as soon as the mouse is over the bar, not only once
@@ -95,6 +81,11 @@ public:
 
     // Set by MainWindow to trigger the Open dialog
     std::function<void()> onOpenRequested;
+
+    /** "Scale…": open the Scale form for this document (the form replaced the
+        old "Set Unit and Scale" dialog). Without it the panel falls back to
+        that dialog, which the tests still exercise. */
+    std::function<void(int docIndex)> onScaleRequested;
 
     // Right-click "Close Panel": set by MainWindow, invoked from this panel's
     // context menus. requestClose() is the testable entry point.
@@ -456,7 +447,7 @@ public:
     // "| Alt N=value" suffixes for every enabled alternative frequency
     // reference (app.altFreqRefs); empty when none are enabled. Appended to
     // the cursor readout wherever a frequency value is shown.
-    static juce::String altFreqSuffix (const Application& appIn, double freqHz);
+    static juce::String altFreqSuffix (Application& appIn, double freqHz);
 
     // Mapping helpers exposed for unit tests.
     float xToFreq (int x) const;
