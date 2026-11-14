@@ -18,6 +18,8 @@ target_sources (SpectroCraftTests
         ${CMAKE_SOURCE_DIR}/src/ContentAwareTimeScale.cpp   # content-aware time scaling (STFT gap analysis)
         ${CMAKE_SOURCE_DIR}/src/FilterEQ.cpp      # FFT zero-phase curve equaliser
         ${CMAKE_SOURCE_DIR}/src/Envelope.cpp      # amplitude-over-time envelope effect
+        ${CMAKE_SOURCE_DIR}/src/AxisScale.cpp     # per-file axis entries (the Scale form's model)
+        ${CMAKE_SOURCE_DIR}/src/ScaleForm.cpp     # the Scale form
         ${CMAKE_SOURCE_DIR}/src/MarkerManager.cpp
         ${CMAKE_SOURCE_DIR}/src/PythonScripts.cpp
         ${CMAKE_SOURCE_DIR}/src/Actions.cpp     # recorded actions (record/replay/batch)

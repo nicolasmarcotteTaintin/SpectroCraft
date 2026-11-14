@@ -2,6 +2,7 @@
 // SpectroCraft - Undo/redo patch record
 #include <JuceHeader.h>   // juce::String (action name shown in the History tab)
 #include "MarkerManager.h"       // Marker (side state for time-changing edits)
+#include "AxisScale.h"           // sc::axes::Entry (the Scale form: axis edits)
 #include "SavedSelections.h"     // SavedSpectralSelection (same)
 #include "SpectralSelection.h"   // SpectralSelection (active spectral selection)
 #include "DrawingItem.h"         // DrawingItem (user drawings on the spectrogram)
@@ -113,4 +114,10 @@ struct Patch
     std::array<SnapshotSlotChange, kSnapshotSlots> snapshotSlots {};
     // Same for the curve snapshots stored in the Freq/Amp analysis modes.
     std::array<CurveSlotChange, kSnapshotSlots> curveSlots {};
+
+    // Axis entries before/after an edit made in the Scale form. Such an edit
+    // changes no audio at all: oldData/newData stay empty and only the axis
+    // state moves, which is what makes the step undoable from the History tab.
+    bool hasAxisState = false;
+    std::vector<sc::axes::Entry> oldAxes, newAxes;
 };

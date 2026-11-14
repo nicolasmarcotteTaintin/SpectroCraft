@@ -85,6 +85,18 @@ python3 tools/acpp_e2e.py --exe <exe> [--backend metal]          # real audio.cp
 - `-DSPECTRO_ENABLE_AI=OFF` for a light build (no OpenVINO / whisper.cpp).
 - The C++ tests are in `tests/UnitTests.cpp` and `tests/regression/*.inc` (AI control:
   `tests/regression/control.inc`), run by `--run-unit-tests`; ctest splits them into shards.
+- Scale form (per-file axes: units, offset, scale, order, visibility): the model is
+  `include/AxisScale.h` + `src/AxisScale.cpp`, the dialog `include/ScaleForm.h` +
+  `src/ScaleForm.cpp`, applied through `Application::setAxisEntries`; behaviour and
+  limits: `docs/scale-form.md`, tests `tests/regression/axes.inc`.
+- Draggable separators (waveform/spectrogram, video picture/tracks, table
+  list/preview plot) share one widget style: `include/SplitterStyle.h`
+  (`sc::ui::kSplitterH`, `sc::ui::drawSplitterGrip`). Do not draw a private grip
+  in a new splitter.
+- Menu and label text must stay **7-bit ASCII**: `juce::String` treats a plain `const char*`
+  literal as `CharPointer_ASCII` and asserts on bytes > 127, so a literal `…` or `×` shows up as
+  a garbage glyph. Use `...` in menus, or `juce::String::fromUTF8 (u8"…")` when a real
+  non-ASCII character is wanted.
 - AI control code: `include/control/`, `src/control/` (command registry, `--json`, server);
   per-lot handoff notes: `docs/ai-control/progress/`.
 - Auto-update (Windows): `include/Updates.h` + `src/Updates.cpp` (GitHub lookup, signed manifest,

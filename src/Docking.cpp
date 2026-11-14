@@ -937,6 +937,12 @@ void GroupComponent::showPanelMenu (int tabIndex, std::optional<juce::Point<int>
     groupMenu.addItem (kMaximize, mgr_.isMaximized (uid_) ? "Restore Panel Group Size" : "Maximize Panel Group");
     m.addSubMenu ("Panel Group Settings", groupMenu);
 
+    if (mgr_.panelMenuExtender)
+    {
+        m.addSeparator();
+        mgr_.panelMenuExtender (m, id);
+    }
+
     auto opts = juce::PopupMenu::Options();
     if (screenPos.has_value())
         opts = opts.withTargetScreenArea (juce::Rectangle<int> (screenPos->x, screenPos->y, 1, 1));

@@ -240,11 +240,13 @@ public:
         if (v != tablesTopInset) { tablesTopInset = v; dirty = true; imageDirty = true; repaint(); }
     }
     // While an export is composing its offscreen image, rulerH()/plotRect()
-    // address the EXPORT layout instead of the live component bounds.
+    // address the EXPORT layout instead of the live component bounds. The live
+    // height is the whole ruler stack: the normal ruler plus one narrower
+    // strip per extra visible time axis.
     int rulerH() const
     {
         return haveExportLayout_ ? exportRulerH_
-                                 : (showOwnTimeRuler ? kRulerH : 0);
+                                 : (showOwnTimeRuler ? app.rulerStackHeight() : 0);
     }
 
     double getViewStart() const { return viewStart; }
@@ -257,10 +259,15 @@ public:
     // by default and can be moved to the bottom. Both apply to both tracks.
     bool axisOnRight() const { return app.settings.trackAxisOnRight; }
     bool rulerAtBottom() const { return app.settings.trackRulerAtBottom; }
+
+    /** Horizontal space reserved for the vertical axes: shared with the
+        waveform and the dedicated tables track (the widest one wins). */
+    int axisW() const { return app.axisStripWidth(); }
     // Hit tests for the two chrome strips (full component height/width).
     bool onAxisX (int x) const
     {
-        return axisOnRight() ? x >= getWidth() - kLeftAxisWidth : x < kLeftAxisWidth;
+        const int w = axisW();
+        return axisOnRight() ? x >= getWidth() - w : x < w;
     }
     /** The channel whose number label (axis strip, row centre) is at p, -1
         when none. A click there mutes/unmutes the channel's playback;
@@ -269,7 +276,8 @@ public:
     bool onRulerY (int y) const
     {
         if (!showOwnTimeRuler) return false;   // stacked: the waveform's ruler covers it
-        return rulerAtBottom() ? y >= getHeight() - kRulerH : y < rulerH();
+        const int h = rulerH();
+        return rulerAtBottom() ? y >= getHeight() - h : y < h;
     }
     float freqToY (double freq, int height) const;
     double yToFreq (float y, int height) const;
@@ -308,7 +316,7 @@ public:
 
     // Full canvas size used by the drawing code: normally the component's own
     // bounds, but the export layout while saveAsPng() is composing.
-    int layoutWidth()  const { return haveExportLayout_ ? (kLeftAxisWidth + exportLayout_.getWidth())  : getWidth(); }
+    int layoutWidth()  const { return haveExportLayout_ ? (axisW() + exportLayout_.getWidth())  : getWidth(); }
     int layoutHeight() const { return haveExportLayout_ ? (exportLayout_.getHeight() + exportRulerH_) : getHeight(); }
 
     // Overlay pieces, split so an export can bake in a subset of them.

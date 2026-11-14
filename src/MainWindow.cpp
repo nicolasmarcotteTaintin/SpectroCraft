@@ -36,6 +36,7 @@
     #include "NoiseSuppression.h"
 #endif
 #include "IconData.h"
+#include "ScaleForm.h"
 #include "Version.h"   // auto-generated: SC_VERSION_STRING (bumped on every build)
 #include <algorithm>
 
@@ -295,8 +296,9 @@ MainWindow::MainWindow (Application& appIn, const juce::String& name)
     // resized(), so call the base Component implementation explicitly.
     juce::Component::addAndMakeVisible (&menuBar);
 
-    // Left-side panels in two tab groups
-    fileListPanel = std::make_unique<FileListPanel> (app);
+    // Left-side panels in two tab groups. The document list is not a panel
+    // any more: it lives in File > Loaded Files, and its axis settings in the
+    // Scale form.
     fftPanel      = std::make_unique<FFTAnalysisView> (app);
     controlsPanel = std::make_unique<SpectralControlsPanel> (app);
     markersPanel  = std::make_unique<MarkerListPanel> (app);
@@ -347,7 +349,6 @@ MainWindow::MainWindow (Application& appIn, const juce::String& name)
         if (tablesTrack && hi > lo) tablesTrack->setValueRange (lo, hi);
     };
 
-    fileListPanel->onOpenRequested = [this] { handleFileOpen(); };
 
     // Clicking a history row jumps to that state: undo or redo as many steps
     // as needed in one batched operation, then refresh everything.
@@ -377,7 +378,6 @@ MainWindow::MainWindow (Application& appIn, const juce::String& name)
                                   };
 
     // Panels close from their ≡ tab menu or the Window menu.
-    fileListPanel->onCloseRequested   = [this] { setPanelVisible ("files", false); };
     fftPanel->onCloseRequested        = [this] { setPanelVisible ("fft", false); };
     historyPanel->onCloseRequested    = [this] { setPanelVisible ("history", false); };
     actionsPanel->onRunRequested      = [this] (int idx) { runAction (idx); };
@@ -440,7 +440,7 @@ MainWindow::MainWindow (Application& appIn, const juce::String& name)
     for (const auto& e : leftPanelEntries ())
     {
         const juce::String id (e.id);
-        dock_->setDefaultBuddy (id, e.defaultTop ? (id == "fft" ? "files" : "fft")
+        dock_->setDefaultBuddy (id, e.defaultTop ? (id == "fft" ? "history" : "fft")
                                                  : (id == "controls" ? "markers" : "controls"));
     }
     dock_->onLayoutChanged = [this]
@@ -455,6 +455,17 @@ MainWindow::MainWindow (Application& appIn, const juce::String& name)
     dock_->onUnhandledKey = [this] (const juce::KeyPress& k) { return keyPressed (k, this); };
     dock_->isInterestedInFiles = [this] (const juce::StringArray& f) { return isInterestedInFileDrag (f); };
     dock_->onFilesDropped = [this] (const juce::StringArray& f) { filesDropped (f, 0, 0); };
+
+    // Right-clicking a panel header (a tab, or the ⋯ button) also gets the
+    // document actions: the Editor's folder and its Scale form.
+    dock_->panelMenuExtender = [this] (juce::PopupMenu& menu, const juce::String& panelId)
+    {
+        if (panelId != "editor") return;
+        const bool hasPath = app.doc() != nullptr
+                             && ! app.doc()->file.getFullPathName().isEmpty();
+        menu.addItem (PanelFolderId, "Open Containing Folder", hasPath, false);
+        menu.addItem (PanelScaleId,  "Scale...", app.doc() != nullptr, false);
+    };
     juce::Component::addAndMakeVisible (dock_->mainArea ());
 
     // Workspaces: the built-in arrangements plus the user's own, each with
@@ -854,8 +865,14 @@ void MainWindow::setupViews()
     };
 
     // Right-click context menus in either view route to the same actions.
-    waveformView->onContextAction = [this] (int id) { handleContextMenuAction (id); };
-    spectralView->onContextAction = [this] (int id) { handleContextMenuAction (id); };
+    waveformView->onContextAction = [this] (int id) {
+        ctxScaleKind = (int) sc::axes::Kind::Amplitude;
+        handleContextMenuAction (id);
+    };
+    spectralView->onContextAction = [this] (int id) {
+        ctxScaleKind = (int) sc::axes::Kind::Frequency;
+        handleContextMenuAction (id);
+    };
 
     // Armed scale calibration: once the reference point is placed in the
     // spectrogram, prompt for its value and apply the resulting scale.
@@ -1050,8 +1067,12 @@ void MainWindow::layoutEditor()
     if (tablesSep)     tablesSep->setVisible (showTablesTrack);
     if (tablesVScroll) tablesVScroll->setVisible (showTablesTrack);
 
-    const int axL = app.settings.trackAxisOnRight ? 0 : kLeftAxisWidth;
-    const int axR = app.settings.trackAxisOnRight ? kLeftAxisWidth : 0;
+    // The tracks' shared axis width grows with the axes in the Scale form, and
+    // so does the ruler stack: the bars have to follow them, or the horizontal
+    // bar would run under the axis strips and the vertical one past the data.
+    const int axisW = app.axisStripWidth();
+    const int axL = app.settings.trackAxisOnRight ? 0 : axisW;
+    const int axR = app.settings.trackAxisOnRight ? axisW : 0;
 
     juce::Component* topRulerOwner = nullptr;   // view that draws the top ruler
     if (!rulerBottom && showWave)                    topRulerOwner = waveformView.get ();
@@ -1085,7 +1106,7 @@ void MainWindow::layoutEditor()
                                            std::max (0, area.getWidth() - vScrollW),
                                            trackH);
         if (topRulerOwner != nullptr)
-            tablesRect.setY (area.getY() + WaveformView::kRulerH);   // below the top ruler
+            tablesRect.setY (area.getY() + app.rulerStackHeight());   // below the top ruler
         else
             tablesRect.setY (area.getY() - trackH - sepH);          // in the removed strip above
         tablesTrack->setBounds (tablesRect);
@@ -1116,7 +1137,7 @@ void MainWindow::layoutEditor()
         // draws its own time ruler strip (top or bottom) that strip is excluded
         // so the bar stops at the actual data height.
         int topInset = 0, botInset = 0;
-        vScrollInsetsForView (view, topInset, botInset);
+        vScrollInsetsForView (app, view, topInset, botInset);
 
         if (vbar) vbar->setBounds (juce::Rectangle<int> (barX, full.getY() + topInset,
                                                         vScrollW,
@@ -1126,7 +1147,7 @@ void MainWindow::layoutEditor()
     if (showWave && showSpec)
     {
         const int waveH = (int) std::lround (mainArea.getHeight() * splitRatio);
-        const int barH = 6;
+        const int barH = sc::ui::kSplitterH;
         placeViewWithScrollBar (juce::Rectangle<int> (mainArea.getX(), mainArea.getY(),
                                                       mainArea.getWidth(), waveH),
                                 waveformView.get(), waveVScroll.get());
@@ -1185,7 +1206,6 @@ void MainWindow::handleTablesSepDrag (const juce::MouseEvent& e)
 
 const char* MainWindow::panelIdFor (juce::Component* c) const
 {
-    if (c == fileListPanel.get())       return "files";
     if (c == fftPanel.get())            return "fft";
     if (c == historyPanel.get())        return "history";
     if (c == actionsPanel.get())        return "actions";
@@ -1210,7 +1230,6 @@ const char* MainWindow::panelIdFor (juce::Component* c) const
 std::vector<MainWindow::LeftPanelEntry> MainWindow::leftPanelEntries() const
 {
     return {
-        { "files",       "Files",              true  },
         { "fft",         "Frequency Analysis", true  },
         { "history",     "History",            true  },
         { "actions",     "Actions",            true  },
@@ -1230,7 +1249,6 @@ std::vector<MainWindow::LeftPanelEntry> MainWindow::leftPanelEntries() const
 juce::Component* MainWindow::panelForId (const juce::String& id) const
 {
     if (id == "editor")      return editorPanel_.get ();
-    if (id == "files")       return fileListPanel.get ();
     if (id == "fft")         return fftPanel.get ();
     if (id == "history")     return historyPanel.get ();
     if (id == "actions")     return actionsPanel.get ();
@@ -1445,7 +1463,7 @@ juce::var MainWindow::builtInWorkspaceLayout (const juce::String& id) const
         // spectral tools on the right, tables and video below the Editor.
         return dockLayout (dockSplit (true, {
             { dockSplit (false, {
-                  { dockGroup ({ "files", "history", "actions", "python" }), 0.5 },
+                  { dockGroup ({ "history", "actions", "python" }), 0.5 },
                   { dockGroup ({ "markers", "transcription", "selection" }), 0.5 } }), 0.2 },
             { dockSplit (false, {
                   { dockGroup ({ "editor" }), 0.74 },
@@ -1463,13 +1481,13 @@ juce::var MainWindow::builtInWorkspaceLayout (const juce::String& id) const
             { dockSplit (true, {
                   { dockGroup ({ "controls", "selection", "drawing" }), 0.34 },
                   { dockGroup ({ "markers", "transcription", "history" }), 0.33 },
-                  { dockGroup ({ "tables", "files", "actions", "python", "video" }), 0.33 } }), 0.34 } }));
+                  { dockGroup ({ "tables", "actions", "python", "video" }), 0.33 } }), 0.34 } }));
 
     if (id == "video")
         // The picture large above the Editor.
         return dockLayout (dockSplit (true, {
             { dockSplit (false, {
-                  { dockGroup ({ "files", "history", "actions", "python", "tables" }), 0.5 },
+                  { dockGroup ({ "history", "actions", "python", "tables" }), 0.5 },
                   { dockGroup ({ "markers", "transcription", "selection", "drawing" }), 0.5 } }), 0.2 },
             { dockSplit (false, {
                   { dockSplit (true, {
@@ -1481,7 +1499,7 @@ juce::var MainWindow::builtInWorkspaceLayout (const juce::String& id) const
     // beside the Editor.
     return dockLayout (dockSplit (true, {
         { dockSplit (false, {
-              { dockGroup ({ "files", "fft", "history", "actions", "python", "tables", "video" }, "fft"), 0.52 },
+              { dockGroup ({ "fft", "history", "actions", "python", "tables", "video" }, "fft"), 0.52 },
               { dockGroup ({ "controls", "markers", "transcription", "selection", "drawing" }), 0.48 } }), 0.245 },
         { dockGroup ({ "editor" }), 0.755 } }));
 }
@@ -2320,6 +2338,12 @@ void MainWindow::syncSharedState()
 {
     updateTitle();   // cheap: keeps the * in sync with any state change
 
+    // An open Scale form mirrors the document's axes: if something else changed
+    // them (an undo, another session), it has to follow, or its controls would
+    // act on the state they were built from. refreshFromApp() does nothing when
+    // nothing changed, so typing in a field is never thrown away.
+    if (scaleForm) scaleForm->refreshFromApp();
+
     if (waveformView)
     {
         waveformView->setSelection (app.selection);
@@ -2403,7 +2427,6 @@ void MainWindow::syncSharedState()
 
 void MainWindow::refreshPanels()
 {
-    if (fileListPanel)  fileListPanel->refresh();
     if (controlsPanel)  controlsPanel->refresh();
     if (markersPanel)   markersPanel->refresh();
 #if defined(SC_ENABLE_AI) && SC_ENABLE_AI
@@ -3893,7 +3916,6 @@ void MainWindow::runSaveAsync (const juce::File& file, bool saveAs)
                 {
                     if (mw->statusBar && doc == app.doc ())
                         mw->statusBar->setFileName (file.getFileName ());
-                    if (mw->fileListPanel) mw->fileListPanel->refresh ();
                 }
                 if (!metaWritten)
                     sc::alert::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
@@ -4148,7 +4170,8 @@ void MainWindow::updateAutoFftLabel()
     controlsPanel->rebuildFftSizeItems (n);
 }
 
-void MainWindow::vScrollInsetsForView (juce::Component* view, int& topInset, int& botInset)
+void MainWindow::vScrollInsetsForView (Application& app, juce::Component* view,
+                                      int& topInset, int& botInset)
 {
     // The vertical scrollbar spans only the track data area: when a view draws
     // its own time ruler strip (top or bottom) that strip is excluded so the
@@ -4158,16 +4181,18 @@ void MainWindow::vScrollInsetsForView (juce::Component* view, int& topInset, int
     {
         if (wv->showsTimeRuler())
         {
-            if (wv->rulerAtBottom()) botInset = WaveformView::kRulerH;
-            else                     topInset = WaveformView::kRulerH;
+            const int h = app.rulerStackHeight();   // the whole stack, extra axes included
+            if (wv->rulerAtBottom()) botInset = h;
+            else                     topInset = h;
         }
     }
     else if (auto* sv = dynamic_cast<SpectralView*> (view))
     {
         if (sv->showsOwnTimeRuler())
         {
-            if (sv->rulerAtBottom()) botInset = SpectralView::kRulerH;
-            else                     topInset = SpectralView::kRulerH;
+            const int h = app.rulerStackHeight();
+            if (sv->rulerAtBottom()) botInset = h;
+            else                     topInset = h;
         }
     }
 }
@@ -4379,6 +4404,30 @@ void MainWindow::menuItemSelected (int menuItemID, int topLevelMenuIndex)
                 // Drop it so the menu self-heals on next open.
                 app.removeRecentFile (f);
         }
+        return;
+    }
+
+    // File > Loaded Files: activate a document, or act on the active one.
+    if (menuItemID >= DocBase && menuItemID < DocEnd)
+    {
+        const int i = menuItemID - DocBase;
+        if (i >= 0 && i < app.numDocs())
+            activateDocById (app.docs[(size_t) i]->id);
+        return;
+    }
+    if (menuItemID == DocScaleForm || menuItemID == PanelScaleId)
+    {
+        openScaleForm (ctxScaleKind);
+        return;
+    }
+    if (menuItemID == DocFolder || menuItemID == PanelFolderId)
+    {
+        openActiveDocFolder();
+        return;
+    }
+    if (menuItemID == DocClose)
+    {
+        if (app.doc() != nullptr) handleCloseFile();   // asks about unsaved changes
         return;
     }
 
@@ -5067,7 +5116,7 @@ void MainWindow::startUpdate (const sc::update::ReleaseInfo& rel, const sc::upda
         sc::alert::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Update",
             "SpectroCraft is running from a folder it may not write to:\n\n"
             + install.getFullPathName() + "\n\n"
-            "Copy the program to a folder you own (Desktop, Documents…) and start "
+            "Copy the program to a folder you own (Desktop, Documents...) and start "
             "it from there; the update replaces the files in that folder.",
             "", this);
         return;
@@ -5077,7 +5126,7 @@ void MainWindow::startUpdate (const sc::update::ReleaseInfo& rel, const sc::upda
     const juce::String current = SC_VERSION_STRING;
 
     auto* dlg = new WorkProgressDialog ("Installing SpectroCraft " + version,
-                                        "Downloading the update manifest…", true, this);
+                                        "Downloading the update manifest...", true, this);
     dlg->setProgress (0.0);
     dlg->beginModal();
     updateCheckRunning = true;
@@ -5426,7 +5475,17 @@ void MainWindow::handleContextMenuAction (int id)
         }
         case CtxPasteMix:        runDestructiveEdit ([&] (std::string* e) { return app.pasteMix (e); }); break;
 
-        // ---- Scale menu: time axis + vertical axis (independent) ----
+        // ---- The Scale form (replaces the old Scale / Alternative Scale
+        // submenus): modeless and always-on-top so the tracks keep reacting
+        // while the form is open. ----
+        case CtxScaleForm:
+            openScaleForm (ctxScaleKind);
+            break;
+        case CtxOpenFolder:
+            openActiveDocFolder();
+            break;
+
+        // ---- Legacy Scale menu items (kept for the AI-control path) ----
         case CtxScaleTimeTime:
             app.timeAxisMode = TimeAxisMode::Time;
             app.timeOffsetSecs = 0.0;
@@ -5571,6 +5630,189 @@ void MainWindow::armRefClick (Application::RefClickTarget target)
     if (statusBar) statusBar->setModeText ("Place the reference point in the spectrogram...");
 }
 
+/* Open (or raise) the Scale form. Modeless and always on top on purpose: the
+   form stays usable while the playhead moves and while references are clicked
+   in the tracks, which is how the old alternative-scale flow was used. */
+void MainWindow::openScaleForm (int axisKind)
+{
+    if (app.doc() == nullptr)
+    {
+        if (statusBar) statusBar->setModeText ("Open a file to edit its axes.");
+        return;
+    }
+
+    if (scaleForm == nullptr)
+        scaleForm = std::make_unique<ScaleFormWindow> (app);
+
+    scaleForm->setKindForNewAxis ((sc::axes::Kind) std::clamp (axisKind, 0, 2));
+    scaleForm->onPickRequest = [this] (int entryIndex, ScaleFormWindow::PickAction action)
+    { handleScalePick (entryIndex, action); };
+    scaleForm->refreshFromApp();
+    scaleForm->setVisible (true);
+    scaleForm->toFront (false);
+    scaleForm->setAlwaysOnTop (true);
+}
+
+/** Reveal the file the active document came from in the file browser. A
+   brand-new document has no path yet and says so in the status bar. */
+/* Show a file in the OS file browser: the folder opens with the file selected
+   where the platform can do it. Opening the parent directory with
+   File::startAsProcess left the choice to the shell's association for folders,
+   which on this machine meant handing the path back to SpectroCraft itself - a
+   second instance instead of a file browser. */
+static void revealInFileBrowser (const juce::File& f)
+{
+    if (sc::alert::isHeadless ()) return;   // never launch a browser from the tests
+
+    const juce::String path = f.getFullPathName();
+    if (path.isEmpty()) return;
+
+   #if JUCE_WINDOWS
+    // explorer.exe takes /select,<path>; the path is quoted for names with spaces.
+    if (f.existsAsFile ())
+    {
+        juce::File ("explorer.exe").startAsProcess ("/select,\"" + path + "\"");
+        return;
+    }
+   #elif JUCE_MACOS
+    if (f.existsAsFile ())
+    {
+        juce::File ("/usr/bin/open").startAsProcess ("-R \"" + path + "\"");
+        return;
+    }
+   #endif
+
+    f.getParentDirectory().startAsProcess();   // no file to select: just the folder
+}
+
+void MainWindow::openActiveDocFolder()
+{
+    if (FileDoc* d = app.doc(); d != nullptr && ! d->file.getFullPathName().isEmpty())
+    {
+        revealInFileBrowser (d->file);
+        return;
+    }
+    if (statusBar) statusBar->setModeText ("This document has no file path yet.");
+}
+
+/* A Scale form crosshair button. Which arithmetic it asks for depends on the
+   axis and on the action: an offset that makes the playhead read a given time,
+   an offset + scale that make a selection's two ends read the typed times, or a
+   reference point placed by clicking in the track. */
+void MainWindow::handleScalePick (int entryIndex, ScaleFormWindow::PickAction action)
+{
+    auto list = app.axisEntries;
+    if (entryIndex < 0 || entryIndex >= (int) list.size()) return;
+    sc::axes::Entry& e = list[(size_t) entryIndex];
+    const double rate = app.audioEngine().sampleRate();
+    const bool clockUnits = (e.kind == sc::axes::Kind::Time && e.units == 0);
+
+    if (action == ScaleFormWindow::PickAction::OffsetFromPlayhead)
+    {
+        if (! app.audioEngine().isFileLoaded()) return;
+        double v = 0.0;
+        if (! promptNumberValue (this, "Offset at the Playhead",
+                                 "Displayed time at the playhead position\n"
+                                 "(h:mm:ss.xxxx, plain seconds, or a sample count):",
+                                 sc::axes::formatTime (e, app.playhead, rate), v, clockUnits))
+            return;
+        e.offset = sc::axes::offsetForDisplayedValue (e, app.playhead, v, rate);
+    }
+    else if (action == ScaleFormWindow::PickAction::TimeScaleFromSelection)
+    {
+        const auto sel = app.selection;
+        if (sel.getLength() <= 1e-9)
+        {
+            if (statusBar) statusBar->setModeText (
+                "Select a time range first: its start and end set the offset and scale.");
+            return;
+        }
+        double v0 = 0.0, v1 = 0.0;
+        if (! promptNumberValue (this, "Offset and Scale from the Selection",
+                                 "Displayed time at the selection START:",
+                                 sc::axes::formatTime (e, sel.getStart(), rate), v0, clockUnits))
+            return;
+        if (! promptNumberValue (this, "Offset and Scale from the Selection",
+                                 "Displayed time at the selection STOP:",
+                                 sc::axes::formatTime (e, sel.getEnd(), rate), v1, clockUnits))
+            return;
+        const bool scaled = sc::axes::solveTimePoints (e, sel.getStart(), v0,
+                                                       sel.getEnd(), v1, rate);
+        if (! scaled)
+        {
+            if (e.units == 2)
+            {
+                // Sample counts carry no scale factor: only the offset followed.
+                if (statusBar) statusBar->setModeText (
+                    "Sample units have no scale factor: only the offset was set.");
+            }
+            else
+            {
+                if (statusBar) statusBar->setModeText (
+                    "Those two points give no usable scale factor - nothing changed.");
+                return;
+            }
+        }
+    }
+    else
+    {
+        // Reference: arm the click in the track and wait for handleRefClickPlaced.
+        if (! app.audioEngine().isFileLoaded()) return;
+        pendingScaleEntry = entryIndex;
+        if (e.kind == sc::axes::Kind::Amplitude)
+        {
+            armRefClick (Application::RefClickTarget::WaveAmplitude);
+            if (statusBar) statusBar->setModeText (
+                "Click the reference point in the waveform...");
+        }
+        else
+        {
+            armRefClick (Application::RefClickTarget::AxisFrequency);
+            if (statusBar) statusBar->setModeText (
+                "Click the reference point in the spectrogram...");
+        }
+        return;   // completed by handleRefClickPlaced
+    }
+
+    if (! app.setAxisEntries (list, "Scale")) return;
+    if (scaleForm) scaleForm->refreshFromApp();
+    syncSharedState();
+}
+
+/* The scale factor that makes an axis entry show `typedValue` at the point the
+   user clicked (`mainValue`, in the axis's own underlying units: normalized
+   amplitude, or Hz). Inverting displayValueFrequency / formatAmplitude. */
+void MainWindow::applyScaleReference (int entryIndex, double mainValue, double typedValue)
+{
+    auto list = app.axisEntries;
+    if (entryIndex < 0 || entryIndex >= (int) list.size()) return;
+    sc::axes::Entry& e = list[(size_t) entryIndex];
+    if (std::abs (mainValue) < 1e-9)
+    {
+        if (statusBar) statusBar->setModeText (
+            "That reference sits at zero, which gives no scale factor. Pick another point.");
+        return;
+    }
+
+    const double nyq = std::max (1.0, app.audioEngine().sampleRate() * 0.5);
+    if (e.kind == sc::axes::Kind::Time)
+    {
+        // A single time point sets the offset, not the scale.
+        e.offset = sc::axes::offsetForDisplayedValue (e, app.refClickT, typedValue,
+                                                      app.audioEngine().sampleRate());
+    }
+
+    const double scale = sc::axes::scaleForReference (e, mainValue, typedValue, nyq);
+    if (! std::isfinite (scale) || std::abs (scale) < 1e-12)
+    {
+        if (statusBar) statusBar->setModeText ("That reference gives an unusable scale.");
+        return;
+    }
+    e.scale = scale;
+    if (! app.setAxisEntries (list, "Scale")) return;
+    syncSharedState();
+}
+
 void MainWindow::handleRefClickPlaced (double tSecs, double fHz)
 {
     const auto target = app.refClickTarget;
@@ -5593,6 +5835,16 @@ void MainWindow::handleRefClickPlaced (double tSecs, double fHz)
             message = "Value at this frequency:";
             initial = juce::String (fHz, 1);
             break;
+        case Application::RefClickTarget::WaveAmplitude:
+            title   = "Amplitude Scale from a Reference";
+            message = "Value at this point of the waveform:";
+            initial = juce::String (fHz, 4);   // the clicked amplitude, see below
+            break;
+        case Application::RefClickTarget::AxisFrequency:
+            title   = "Frequency Scale from a Reference";
+            message = "Value at this frequency:";
+            initial = juce::String (fHz, 1);
+            break;
         default:
             app.refClickTarget = Application::RefClickTarget::None;
             app.haveRefClickPt = false;
@@ -5610,6 +5862,18 @@ void MainWindow::handleRefClickPlaced (double tSecs, double fHz)
     if (!ok)
     {
         if (spectralView) spectralView->repaint();
+        return;
+    }
+
+    /* A reference the Scale form asked for: the value typed at the placed point
+       is what that axis entry has to show there. */
+    if (target == Application::RefClickTarget::WaveAmplitude
+        || target == Application::RefClickTarget::AxisFrequency)
+    {
+        const int entry = pendingScaleEntry;
+        pendingScaleEntry = -1;
+        if (entry >= 0) applyScaleReference (entry, fHz, v);
+        if (scaleForm) scaleForm->refreshFromApp();
         return;
     }
 
@@ -5770,11 +6034,27 @@ MainWindow::GoToTimeFields MainWindow::computeGoToTimeFields (Application& app)
         default:                        f.mainId = "Time (s)";    break;
     }
 
-    // One field per enabled alternative time reference. Degenerate ones
-    // (zero alt value) cannot be inverted and are skipped, as are duplicate
-    // names (editor ids must stay unique).
+    // One field per visible "Footer Only" time axis. Duplicate names are
+    // skipped (editor ids must stay unique). A caller that filled the derived
+    // alternative-reference list directly (without axis entries) still gets its
+    // fields: those are encoded with a negative index.
     juce::StringArray used;
     used.add (f.mainId);
+    const auto footer = sc::axes::footerOnly (app.axisEntries, sc::axes::Kind::Time);
+    if (! footer.empty())
+    {
+        for (int i = 0; i < (int) app.axisEntries.size(); ++i)
+        {
+            const auto& e = app.axisEntries[(size_t) i];
+            if (e.kind != sc::axes::Kind::Time || e.type != sc::axes::Type::FooterOnly
+                || ! e.visible) continue;
+            juce::String id = e.name.trim();
+            if (id.isEmpty() || used.contains (id)) continue;
+            used.add (id);
+            f.alts.push_back (std::make_pair (i, id));
+        }
+        return f;
+    }
     for (int i = 0; i < (int) app.altTimeRefs.size(); ++i)
     {
         const auto& r = app.altTimeRefs[(size_t) i];
@@ -5782,7 +6062,7 @@ MainWindow::GoToTimeFields MainWindow::computeGoToTimeFields (Application& app)
         juce::String id = r.name.trim();
         if (id.isEmpty() || used.contains (id)) continue;
         used.add (id);
-        f.alts.push_back (std::make_pair (i, id));
+        f.alts.push_back (std::make_pair (-1 - i, id));
     }
     return f;
 }
@@ -5800,15 +6080,29 @@ bool MainWindow::resolveGoToTime (Application& app, const GoToTimeFields& fields
                                rate, outSecs))
         return true;
 
-    // Then the alternative references in field order: invert their scale,
-    // alt(x) = x * altValue / refMain  ->  x = v * refMain / altValue.
+    // Then the alternative fields in field order: an axis entry parses in its
+    // own units, a derived reference inverts its scale
+    // (alt(x) = x * altValue / refMain  ->  x = v * refMain / altValue).
     for (size_t i = 0; i < fields.alts.size() && i < altTexts.size(); ++i)
     {
         const int idx = fields.alts[(int) i].first;
-        if (idx < 0 || idx >= (int) app.altTimeRefs.size()) continue;
-        const auto& r = app.altTimeRefs[(size_t) idx];
+        if (altTexts[i].trim().isEmpty()) continue;
+        if (idx >= 0)
+        {
+            if (idx >= (int) app.axisEntries.size()) continue;
+            double v = 0.0;
+            if (sc::axes::parseTime (app.axisEntries[(size_t) idx], altTexts[i], rate, v))
+            {
+                outSecs = v;
+                return true;
+            }
+            continue;
+        }
+        const int ri = -1 - idx;
+        if (ri >= (int) app.altTimeRefs.size()) continue;
+        const auto& r = app.altTimeRefs[(size_t) ri];
         double v = 0.0;
-        if (!altTexts[i].trim().isEmpty() && parseGainDbText (altTexts[i], v))
+        if (parseGainDbText (altTexts[i], v))
         {
             outSecs = v * r.refMain / r.altValue;
             return true;
@@ -5838,7 +6132,17 @@ juce::AlertWindow* MainWindow::createGoToTimeDialog ()
 
     for (const auto& a : fields.alts)
     {
-        const auto& r = app.altTimeRefs[(size_t) a.first];
+        if (a.first >= 0)
+        {
+            if (a.first >= (int) app.axisEntries.size()) continue;
+            w->addTextEditor (a.second,
+                              sc::axes::formatTime (app.axisEntries[(size_t) a.first],
+                                                    app.playhead, rate));
+            continue;
+        }
+        const int ri = -1 - a.first;
+        if (ri < 0 || ri >= (int) app.altTimeRefs.size()) continue;
+        const auto& r = app.altTimeRefs[(size_t) ri];
         w->addTextEditor (a.second,
                           juce::String (Application::altScaleValue (r, app.playhead), 3));
         if (auto* e = w->getTextEditor (a.second))
@@ -9071,6 +9375,27 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String& 
             recentMenu.addItem (ClearRecent, "Clear Recent Files", true, false);
         }
         menu.addSubMenu ("Open Recent", recentMenu);
+
+        // Loaded Files: the documents open in this session. This replaces the
+        // Files panel: pick one to make it active, close it, open its folder,
+        // or open its Scale form.
+        if (app.numDocs() > 0)
+        {
+            juce::PopupMenu docsMenu;
+            FileDoc* active = app.doc();
+            for (int i = 0; i < app.numDocs(); ++i)
+            {
+                const auto& d = *app.docs[(size_t) i];
+                const juce::String name = d.file.getFileName().isEmpty()
+                                        ? "Untitled" : d.file.getFileName();
+                docsMenu.addItem (DocBase + i, name, true, active == &d);
+            }
+            docsMenu.addSeparator();
+            docsMenu.addItem (DocScaleForm, "Scale...", active != nullptr);
+            docsMenu.addItem (DocFolder, "Open Containing Folder", active != nullptr);
+            docsMenu.addItem (DocClose, "Close Active Document", active != nullptr);
+            menu.addSubMenu ("Loaded Files", docsMenu);
+        }
 
         menu.addItem (FileClose, "Close\tCtrl+W", app.audioEngine().isFileLoaded(), false);
         if (app.numDocs () > 0)

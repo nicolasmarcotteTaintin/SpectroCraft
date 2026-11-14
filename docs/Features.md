@@ -134,7 +134,7 @@ Built with **C++20**, **JUCE 9** (vendored in `extern/JUCE`) and **CMake**.
   - Top-left tab group: **Files** (lists every loaded file with its sample
     rate, channel count and duration — plus its scale calibration when set;
     double-click a row to make it active, right-click for Activate / Close /
-    Set Unit and Scale... / Open Containing Folder), **History**, and
+    Scale… (opens the Scale form) / Open Containing Folder), **History**, and
     **Frequency Analysis** (visible by default): live FFT with dB/Hz axes and
     a cursor readout.
     A single click in either view re-analyses immediately: with no selection
@@ -457,11 +457,14 @@ Built with **C++20**, **JUCE 9** (vendored in `extern/JUCE`) and **CMake**.
       (*Editor* while no file is open; a new, never saved file shows its
       display name; *Save As* renames the tab). Each file opened joins the
       Editor's group as a new tab; clicking a tab makes that file the active
-      one, and switching files any other way (Files panel, Ctrl+Tab) brings
+      one, and switching files any other way (File > Loaded Files, Ctrl+Tab) brings
       its tab to the front. All the tabs share one waveform/spectrogram,
       which moves into the active file's tab: a file tab dragged to another
       group or window shows the file's name there until it is clicked. Files
-      are closed as before (File > Close, the Files panel).
+      are closed as before (File > Close, File > Loaded Files > Close Active
+      Document). The old **Files** panel is gone: its document list lives in
+      **File > Loaded Files** (activate a document, **Scale...**, **Open
+      Containing Folder**, **Close Active Document**).
     - **Drag a tab** onto another group: a drop overlay splits that group into
       a centre rectangle (*add as a tab*) and four trapezoids (*dock left /
       right / top / bottom* of it); the zone under the cursor turns violet and
@@ -662,9 +665,12 @@ Built with **C++20**, **JUCE 9** (vendored in `extern/JUCE`) and **CMake**.
   hosts a small named-pipe forwarding server, so this works no matter how the
   first instance was started — even one that launched while multiple instances
   were still allowed.
-- **Scale calibration (Set Unit and Scale)**: right-clicking a file in the Files list
-  offers **Set Unit and Scale...**, which asks for physical units (**Volts, Pascal, g or
-  None**) — one shared unit for all channels — plus **one full-scale value per
+- **Scale calibration (Scale form)**: right-clicking a file in the Files list
+  offers **Scale…**, which opens the Scale form for that document; there the
+  amplitude axis' unit (**Volt, Pascal, g** or plain **None**) and its per-channel
+  full-scale values calibrate the file, exactly as the old "Set Unit and Scale"
+  dialog did.
+  The unit is shared by all channels, with **one full-scale value per
   channel** — e.g. "2 Pascal" means a full-scale sample (|1.0|) corresponds to
   2 Pa of pressure on that channel. Equal values are stored as a single shared
   number; differing ones are kept per channel and shown joined in the Files list
@@ -979,7 +985,11 @@ panel can be kept above every other window with *Always on Top* from the
 tab menu. The picture keeps its zoom, pan and rotation either way.
 
 Between the picture and the tracks panel sits a thin **draggable separator**:
-drag it to change their ratio (resizing the window keeps it). The little
+drag it to change their ratio (resizing the window keeps it). It is the **same
+bar** as the one between the waveform and the spectrogram and the one between
+the table list and its preview plot: 6 px, three short lines in the middle
+(`include/SplitterStyle.h`, used by `ViewSplitter`, `TrackSplitter` and
+`TablesSplitter`). The little
 double-chevron button in the corner where the scrollbars meet (the workspace
 bar's chevron, rotated 90°) collapses the tracks area away — the picture then
 fills the whole window — and expands it again.
@@ -2134,7 +2144,7 @@ Mouse (waveform *and* spectral views):
 | Left-drag on the time ruler (top or bottom) | Pan the shared time window at half cursor speed (same as middle-drag); does not create a selection |
 | Middle-drag | **Pan both axes at once**: the shared time window horizontally (both views stay in sync) and the amplitude window (waveform) or frequency window (spectral) vertically, from anywhere in the plot. The content follows the cursor at half speed on both axes; panning against a file edge or range limit pins that edge and keeps the span, and reversing direction responds immediately (no dead zone) |
 | Right-drag a region | **Box zoom**: dragging on the track zooms **both** axes at once — time from the box's horizontal span, amplitude (waveform) or frequency (spectral) from its vertical span. With several visible channels the box's vertical extent is clipped to the **channel row it started on**, and the vertical zoom factor is measured against that single row's data height (so a multi-channel file zooms exactly like a single channel would). Dragging that starts on an axis zooms only that axis: the amplitude/frequency axis strip (left or right) → vertical range, the time ruler strip (top or bottom of whichever view draws it) → time range. A rubber-band rectangle is shown while dragging |
-| Right-click | Context menu: Zoom to Selection, Zoom Out Full, Select All (Ctrl+A), Cut / Copy / Paste / Delete, plus a **Scale** submenu (time axis Time/Time Offset.../Sample; vertical axis Wav Units/dB/Normalized in the waveform, Hz/Custom... in the spectrogram; and Alternative Scale Time/Frequency submenus with named reference entries in both views). On the **amplitude/frequency axis strip** (on either side), "Zoom Out Full" resets that view's *vertical* range (amplitude/frequency) instead of the time window. In the spectral view, right-clicking **on the current spectral selection** additionally offers **Move Selection** and **Scale Selection** |
+| Right-click | Context menu: Zoom to Selection, Zoom Out Full, Select All (Ctrl+A), Cut / Copy / Paste / Delete, plus **Scale…** which opens the Scale form for this file (every time/amplitude/frequency axis: units, offset, scale, order, visibility, Add Axis vs Footer Only). On the **amplitude/frequency axis strip** (on either side), "Zoom Out Full" resets that view's *vertical* range (amplitude/frequency) instead of the time window. In the spectral view, right-clicking **on the current spectral selection** additionally offers **Move Selection** and **Scale Selection** |
 | Mouse wheel over the plot / time ruler | Horizontal zoom around the cursor (both views) |
 | Mouse wheel over the amplitude/frequency axis strip (left or right; or Shift + wheel anywhere) | Vertical amplitude zoom (waveform) / frequency-range zoom around the cursor (spectral) — independent per view |
 | Drag the divider between the views | Resize waveform vs spectral area |
@@ -2185,38 +2195,78 @@ across restarts.
     zoom (samples-per-pixel), so numbers stay visible at every magnification,
     and footer/marker fields accept integer or decimal sample counts (the
     length field is a duration in samples).
-- **Vertical Axis** (waveform): how the left amplitude axis is labelled —
-  **Wav Units** (physical value when calibrated, relative dB otherwise),
-  **dB** (plain 0/−6/−12…) or **Normalized** (signed linear amplitude: +a above
-  and −a below the centre line). Grid-line positions are unchanged.
-- The spectrogram's Scale menu instead offers a **Vertical Axis** for its
-  frequency axis: **Hz** (default) or **Custom...**. Custom arms a reference
-  click — click any point in the plot, then enter the value that should appear
-  at its frequency; the whole axis is relabelled by the resulting factor while
-  tick positions stay put.
-- **Alternative Scale** (both views): one or more named linear scales anchored
-  at zero, shown alongside the normal readout in the cursor probe as
-  `| Name=value` for every enabled reference — including the Frequency Analysis
-  panel's cursor readout, where each displayed frequency (snapped bin, band
-  centre or tracked component) gets its own suffix. The right-click menu has Time and
-  Frequency submenus: **New** arms the usual reference-click flow (click a plot
-  point, enter its value; the scale rescales by *value/ref*), and each existing
-  reference appears under its name — choosing it opens an edit dialog where you
-  can rename it, re-enter both endpoint values directly, toggle whether it shows
-  in the probe, or delete it. References are stored with the file's metadata.
-  **Copy Spectrum to Clipboard** from the Frequency Analysis panel carries them
-  along: every exported frequency value gains one extra column per enabled
-  reference — `chN_Name` right next to each channel's Hz in Freq/Amp-vs-Time
-  curve modes, and a shared `Name` column after `freq_Hz` in Amp-vs-Freq and
-  the classic/1/3-octave tables — converted by exactly the same factor as the
-  axis overlay, so the clipboard table holds both raw Hz and your scaled units.
-  Every exported table uses **tab-separated columns** (Excel-friendly).
-- **Go to Time... (Ctrl+G)**: a small dialog with one field for the active time
-  axis mode plus one field per enabled alternative-time reference. Type into any
-  of them and OK jumps the playhead there — the main field takes plain seconds,
-  sample counts or clock text depending on the mode, while an alternative field
-  inverts its reference (*value × ref / alt*). The fields are pre-filled with
-  the current values at the playhead.
+- **Scale...** (both views): the **Scale form**, one modeless dialog in its own
+  window (title bar with a close button) that stays above the main window: three
+  columns (Time / Amplitude / Frequency), one block per axis with its settings
+  stacked under its name, **New** at the bottom of each column, **SAME** to copy
+  the column's main axis, and reordering by **dragging a name** inside its
+  column (no arrow buttons)
+  that lists every axis of the current file. It replaces the old **Scale**
+  submenu (Time Axis / Vertical Axis) and the **Alternative Scale** submenu.
+  Each row is one axis: **Name** (with a drag grip), **Units**, **Offset**,
+  **Scale**, **Type** (**Add Axis** draws a strip on the tracks, **Footer Only**
+  only adds a readout — the old alternative scale), a **visibility eye** (the
+  same icon the tables use; its tooltip says **Hide Axis** / **Show Axis**) and
+  an **x** to remove the axis; **Add Axis** adds a row. The **x only appears
+  when the column holds more than one axis**, and it is the same size as the
+  eye, sitting right next to it and ending at the same margin as the text boxes
+  below them. Units are
+  `hh:mm:ss.xxxx` / `ss.xxxx` / `samples` for time, `dB` / `None` / `Volt` /
+  `Pascal` / `g` for amplitude (a physical unit calibrates the file, as the old
+  "Set Unit and Scale" did, with one scale value per channel), and `Hz` / `%`
+  (of Nyquist) / `None` for frequency.
+- **Crosshair buttons take a value from the track instead of the keyboard.**
+  Next to a time axis's **Offset**: the time the playhead should show, which
+  sets the offset. Next to a time axis's **Scale**: the times the selection's
+  two ends should show, which sets the offset *and* the scale (a selection is
+  required; sample units have no scale factor, so only the offset follows). Next
+  to an amplitude or frequency **Scale**: the app waits for a click in the
+  waveform (amplitude) or on a spectrogram line (frequency) and then asks for the
+  value that belongs at that point, which sets the scale — the flow the old
+  Alternative Scale used. A reference at zero, or a selection whose ends show the
+  same value, gives no scale and says so in the status bar.
+- The **first visible Add Axis of each kind is the main axis**: it labels the
+  grid that is actually drawn and drives the level readouts. The other Add Axis
+  entries relabel the *same* tick positions in their own units, in strips placed
+  further out — they never move the grid. **The first row of a column is always
+  the axis closest to the track**: hugging the plot for an amplitude or frequency
+  axis, and hugging the plot's edge for a time ruler whether it is above or
+  below the track, with the extra strips on the far side. Each axis labels only
+  its own strip (an extra axis used to be drawn on top of the main labels on the
+  left side), a secondary axis uses the same smaller type as the extra time
+  axes, and its strip is narrower (38 px against the main 60). A frequency axis is always shared by
+  every channel row (the engine renders one frequency window per spectrogram).
+  The form is modeless and stays on top on purpose: the tracks and the readouts
+  update live while you move the playhead or click a reference.
+- **Every axis of a track reserves the same space**: all three tracks share one
+  axis-strip width (the widest label set wins) and one ruler stack height (the
+  normal 24 px ruler plus a narrower 18 px strip per extra time axis, the main
+  ruler always the one nearest the data). The horizontal time bar and the
+  vertical scrollbars are inset by those same widths, so they span the data
+  rather than the whole track, whatever the axes are. The channel label (L / R /
+  1 2 3 4) sits at the outer edge of the axis area — left of the units when the
+  axis is on the left, right of them when it is on the right — in a larger
+  type, with a gutter reserved for it so it never collides with the labels. The three tracks also share one
+  label size/colour and one grid colour, and the waveform's amplitude grid is
+  drawn *behind* the waveforms instead of over them.
+- **Footer Only** axes appear in the cursor probe as `| Name=value` (including
+  the Frequency Analysis panel's readout, where each displayed frequency —
+  snapped bin, band centre or tracked component — gets its own suffix), as extra
+  fields in **Go to Time**, and as extra columns in the exported tables
+  (`chN_Name` next to each channel's Hz in Freq/Amp-vs-Time curve modes, a
+  shared `Name` column in Amp-vs-Freq and the classic/1/3-octave tables, all
+  converted by exactly the same factor as the axis overlay). Every exported
+  table uses **tab-separated columns** (Excel-friendly).
+- Axis changes are **undoable**: each edit in the form is one step in the History
+  tab (shown as "Scale"), and undo/redo restores the axis list. The axes are
+  stored with the file (embedded SCMD chunk or `.meta.json` sidecar); a file
+  that still carries the older calibration / alternative-reference state is
+  migrated automatically when it is opened. Details: `docs/scale-form.md`.
+- **Go to Time... (Ctrl+G)**: a small dialog with one field for the main time
+  axis plus one field per visible Footer Only time axis. Type into any of them
+  and OK jumps the playhead there — each field is parsed in its own units (plain
+  seconds, sample counts, clock text, or its scale), and the fields are
+  pre-filled with the current values at the playhead.
 - While both views are stacked, exactly one of them draws the shared time
   ruler: the waveform by default (ruler at the top), or the spectrogram when
   **View > Time Ruler at Bottom** is set — the other view hides its strip and
@@ -2517,6 +2567,7 @@ list: a table row followed by its parameter rows.
   curves and the playhead line.
 - A **draggable separator** between the table list and the preview plot
   trades height between them; the plot height is remembered between sessions.
+  Same bar as everywhere else in the app (6 px, three-line grip).
 - **Align** (parameter row): Waveform / Spectrogram / Dedicated submenus with
   Manual / 1 Point / 2 Points options. *Manual* opens a dialog whose fields are
   described by explanatory labels above them: the time offset/scale of the
@@ -2654,7 +2705,7 @@ Clean separation into independent components (see `include/` + `src/`):
 | `SpectralEngine` | Tiled multithreaded FFT: level selection from zoom, tile scheduling on a `juce::ThreadPool`, LRU cache keyed by (tile, channel, level, fftSize, hop, window). Tiles store **raw dB magnitudes**; gain/bias/dB-range/colour-map scaling is applied per pixel at render time, so changing those settings never requires recomputing tiles. Bilinear sampling into RGBA pixels, colour-map LUTs, headless PNG rendering. Never materializes more than one tile per channel at a time — multi-GB files stream through the reader tile by tile. |
 | `WaveformView` / `SpectralView` (`juce::Component`) | Pure drawing + mouse interaction; hold references to their engines and repaint on change messages. Each view holds its own time-window state and its **vertical axis/zoom level** (amplitude for the waveform, frequency range for the spectral view); at application level all horizontal changes flow through `MainWindow::applyTimeWindow`, which keeps both views on the same time range while vertical zooms stay independent. The spectral view requests tiles for its visible range only. Selection, markers and playhead are drawn as overlays *on top of* the audio in both views, so they behave identically wherever you look. |
 | `ScrollBars` (`TimeScrollBar`, `ValueScrollBar`) | Custom scrollbar components: thumb shows the displayed portion relative to the whole track; centre-drag pans, edge-drag zooms one side, click outside jumps. One horizontal time bar plus one vertical bar per view. |
-| `Panels.cpp`: `FileListPanel`, `FFTAnalysisView`, `SpectralControlsPanel`, `MarkerListPanel`, `SelectionPanel`, `DrawingPanel`, `TablesPanel`, `PythonPanel` | Classic DAW-style left column: the **Files** list (every loaded document with its properties; double-click activates, right-click Activate/Close/Set Unit and Scale/Open Containing Folder), live FFT analysis with cursor readout (drawn in frequency space — never indexes the magnitude vector by pixel x), a selectable axis mode (FFT Linear / FFT Log / 1/3 Octave band plot, plus Freq vs Time / Amp vs Time / Amp-vs-Freq curve modes with Ref Time / Smooth / Track options and their own per-mode snapshot store) and harmonic reference lines (right-click **Activate Harmonics** / **Copy Harmonics** / **Clear Harmonics**), spectral settings (colour map/dB/Log-Linear toggle/Reset Freq/FFT size), the marker table, named spectral selections with comments + harmonic cloning, user drawings over the spectrogram (text/arrow/rectangle/freehand with per-item comments, visibility toggles and fit-to-view; Excel-style multi-selection in all three list panels; persisted automatically with per-file metadata), imported CSV **data tables** (`TablesPanel`: indented table/parameter rows with visibility eyes; parameters carry unique palette colours — click cycles, double-click opens the preset picker — plus CSV drag-and-drop / clipboard import with transpose & gap-interpolation rules, downsample, copy, overlay-on-waveform/spectrogram or dedicated-track display modes, and manual/click-picked/correlation-based time alignment per table and per parameter), and the **Python** script editor (dropdown + Add/Remove/Run over a multi-line editor). Panels mutate shared state through `Application` and notify `MainWindow` via `app.onStateChange`. |
+| `Panels.cpp`: `FFTAnalysisView`, `SpectralControlsPanel`, `MarkerListPanel`, `SelectionPanel`, `DrawingPanel`, `TablesPanel`, `PythonPanel` | Classic DAW-style left column (no document list any more: that is **File > Loaded Files**), live FFT analysis with cursor readout (drawn in frequency space — never indexes the magnitude vector by pixel x), a selectable axis mode (FFT Linear / FFT Log / 1/3 Octave band plot, plus Freq vs Time / Amp vs Time / Amp-vs-Freq curve modes with Ref Time / Smooth / Track options and their own per-mode snapshot store) and harmonic reference lines (right-click **Activate Harmonics** / **Copy Harmonics** / **Clear Harmonics**), spectral settings (colour map/dB/Log-Linear toggle/Reset Freq/FFT size), the marker table, named spectral selections with comments + harmonic cloning, user drawings over the spectrogram (text/arrow/rectangle/freehand with per-item comments, visibility toggles and fit-to-view; Excel-style multi-selection in all three list panels; persisted automatically with per-file metadata), imported CSV **data tables** (`TablesPanel`: indented table/parameter rows with visibility eyes; parameters carry unique palette colours — click cycles, double-click opens the preset picker — plus CSV drag-and-drop / clipboard import with transpose & gap-interpolation rules, downsample, copy, overlay-on-waveform/spectrogram or dedicated-track display modes, and manual/click-picked/correlation-based time alignment per table and per parameter), and the **Python** script editor (dropdown + Add/Remove/Run over a multi-line editor). Panels mutate shared state through `Application` and notify `MainWindow` via `app.onStateChange`. |
 | `PythonScripts` | Python panel support: per-user script folder management (`%APPDATA%/SpectroCraft/python`, auto-created with six example scripts), interpreter probing on the PATH, metadata JSON building, float32 WAV temp-file I/O and cross-platform child-process launching (CreateProcess/fork) with cancellation. `Application::runPythonScript` exchanges data with the script through temp files and commits the result via the normal undoable edit path. |
 | `MarkerManager` | Point/region markers with title + comment, sorting, find-near; persisted via per-file metadata (embedded RIFF chunks or `.meta.json`). |
 | WAV marker writer (`AudioEngine::saveWavWithMarkers`) | Custom RIFF writer for `.wav` saves: `fmt` (IEEE float32), `cue` (one entry per marker at its start sample), `LIST`/`adtl` with `labl` (title) + `ltxt` (comment) entries, then the raw interleaved `data`. All chunk sizes are computed up front; streaming files are written in 1 MB blocks. |
@@ -2942,20 +2993,37 @@ delays the window from appearing.
     curve-mode options (Ref Time / Smooth / Track), and the zero-crossing snap
     toggle all survive an app restart via the properties file; stored
     non-power-of-two sizes round up to the next power of two on load.
-  - **Axis scale modes** (right-click Scale menu): time-axis Time / Time
-    Offset... / Sample and vertical-axis Wav Units / dB / Normalized (waveform)
-    or Hz / Custom... (spectrogram), plus checkable Alternative-Scale overlays —
-    verified headlessly through the pure conversion helpers, per-mode ruler
-    rendering diffs, probe text in Sample/TimeOffset modes, frequency-factor
-    relabelling, StatusBar field/playhead round-trips with typed input, and the
-    marker panel's time cells + detail editors.
-  - **Alternative-scale multi-reference + Go to Time**: reference naming /
-    value-inversion helpers; legacy single-reference metadata falling back to one
+  - **Axis scale modes** (the Scale form): time-axis `hh:mm:ss.xxxx` /
+    `ss.xxxx` / samples and amplitude-axis dB / None / Volt / Pascal / g
+    (per-channel scale) / frequency-axis Hz / % / None, with offset, scale,
+    drawing order, visibility and Add Axis vs Footer Only per axis —
+    verified in `tests/regression/axes.inc`: the default one-axis-per-kind
+    state, the shared strip width and ruler stack growing with an added axis and
+    shrinking again on undo, strip/ruler geometry, footer readouts, the main
+    axis' offset+scale, legacy migration and the metadata round trip; the ruler
+    moved to the bottom filling the band below the plot instead of overlapping
+    the track (with a second time axis stacked on the far side), the unit-bearing
+    labels of an extra frequency axis (`500 Hz`, `1.5 kHz`, `50.00 %`); the
+    crosshair arithmetic inverted through the formatters (an offset that makes the
+    playhead show a typed time, respecting an existing scale and sample units; a
+    selection's two ends giving scale+offset, with the degenerate and sample cases
+    reported instead of applied; a clicked reference giving an amplitude scale —
+    including the dB law — or a frequency scale, Hz and % of Nyquist); and the
+    Scale form's own layout: one block per axis in its column, drag reordering
+    inside a column only, the remove button present only where a column has more
+    than one axis, the eye and the remove button the same size and side by side
+    within the fields' right margin, the crosshairs inside their own rows, and the
+    eye's tooltip following what clicking it would do. Probe text
+    in sample/offset modes, frequency-factor relabelling, StatusBar field/
+    playhead round-trips with typed input, and the marker panel's time cells +
+    detail editors are covered as before.
+  - **Footer-only axes + Go to Time**: footer entries naming / value-inversion
+    helpers; legacy single-reference metadata falling back to one
     "Alt 1" entry plus array-form round-trip of names/enabled flags; sample-mode
     tick density at two zoom levels (samples-per-pixel, not seconds); negative
-    clock formatting with carry rounding; Go-to-Time field layout per axis mode
-    and resolution priority (main field first, then alt fields inverting their
-    references, sample counts and clock-through-offset parsing); dialog structure
+    clock formatting with carry rounding; Go-to-Time field layout per axis and
+    resolution priority (main field first, then footer fields parsed in their own
+    units, sample counts and clock-through-offset parsing); dialog structure
     (pre-filled main/alt/reference editors, visibility toggle, OK/Cancel/Delete)
     and the apply logic for edit/cancel/delete with invalid-text rejection;
     waveform probe listing every enabled reference by name, signed readout in

@@ -38,6 +38,10 @@ enum ContextMenuIDs : int
     CtxAltScaleTime       = 23,   // "New" time reference: arms the ref-click flow
     CtxAltScaleFreq       = 24,   // "New" frequency reference: arms the ref-click flow
     CtxCheckHarmonicRatio = 25,   // Frequency Analysis only (Freq vs Time mode)
+    // The Scale form (right-click on any track): replaces the Scale and
+    // Alternative Scale submenus.
+    CtxScaleForm          = 26,
+    CtxOpenFolder         = 27,   // the active document's folder
     // FFT Size submenu + Linear/Logarithmic toggle (right-click on the
     // spectrogram's frequency axis; same actions as Spectral Controls).
     CtxFftIncrease        = 30,   // Alt+Shift+= / '+'
@@ -51,7 +55,7 @@ enum ContextMenuIDs : int
 };
 
 // Time-axis scale for the shared time window (both views, footer, markers).
-enum class TimeAxisMode : int { Time = 0, TimeOffset = 1, Sample = 2 };
+enum class TimeAxisMode : int { Time = 0, TimeOffset = 1, Sample = 2, Seconds = 3 };
 
 struct Settings
 {

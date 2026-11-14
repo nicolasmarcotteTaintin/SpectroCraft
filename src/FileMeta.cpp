@@ -348,6 +348,9 @@ std::string serialiseBundle (const MetaBundle& b, bool includeTranscription)
         root->setProperty ("videoTracks", arr);
     }
 
+    if (!b.axes.empty())
+        root->setProperty ("axes", sc::axes::toJson (b.axes));
+
     auto scale = new juce::DynamicObject();
     scale->setProperty ("unit", static_cast<int> (b.scale.unit));
     scale->setProperty ("fullScaleValue", b.scale.fullScaleValue);
@@ -626,6 +629,17 @@ bool parseBundle (const juce::String& json, MetaBundle& out, std::string* errOut
         }
 
         out.altRef = ar;
+    }
+
+    // Axis entries of the Scale form. When the document has none, the caller
+    // rebuilds them from the legacy calibration / alternative references above
+    // (Application::axesOf), so files written by older versions are unchanged.
+    out.haveAxes = p.contains ("axes");
+    {
+        std::vector<sc::axes::Entry> ax;
+        bool had = false;
+        if (sc::axes::fromJson (p.getWithDefault ("axes", juce::var()), ax, had) && had)
+            out.axes = std::move (ax);
     }
 
     out.haveFreqAnalysis = p.contains ("freqAnalysis");

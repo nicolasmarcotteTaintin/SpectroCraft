@@ -25,15 +25,15 @@ juce::Rectangle<int> SpectralView::plotRect() const
 {
     if (haveExportLayout_)
         return exportLayout_;   // offscreen export canvas layout
-    // The axis strip always takes kLeftAxisWidth of horizontal space; only
+    // The axis strip always takes axisW() of horizontal space; only
     // its side changes with the View menu choice.
-    const int x0 = axisOnRight() ? 0 : kLeftAxisWidth;
+    const int x0 = axisOnRight() ? 0 : axisW();
     // When the ruler is at the top and a dedicated tables track sits below it,
     // that strip's height is reserved inside this view.
     const int inset = (showOwnTimeRuler && !rulerAtBottom()) ? tablesTopInset : 0;
     const int ruY = (showOwnTimeRuler && rulerAtBottom()) ? 0 : rulerH() + inset;
     return { x0, ruY,
-             std::max (1, getWidth() - kLeftAxisWidth),
+             std::max (1, getWidth() - axisW()),
              std::max (1, getHeight() - rulerH() - inset) };
 }
 
@@ -198,47 +198,16 @@ static void showViewContextMenu (Application& app, double clickT, double clickF,
     m.addItem (CtxPasteMix, "Paste Mix\tCtrl+Shift+V", app.canPaste(), false);
     m.addItem (CtxDelete,"Delete\tDel",   hasSel, false);
 
-    // Scale menu: independent time-axis and frequency-axis scales.
-    juce::PopupMenu scaleMenu;
-    {
-        juce::PopupMenu timeAxis;
-        timeAxis.addItem (CtxScaleTimeTime,     "Time",           true,
-                          app.timeAxisMode == TimeAxisMode::Time);
-        timeAxis.addItem (CtxScaleTimeOffset,   "Time Offset...", true,
-                          app.timeAxisMode == TimeAxisMode::TimeOffset);
-        timeAxis.addItem (CtxScaleTimeSample,   "Sample",         true,
-                          app.timeAxisMode == TimeAxisMode::Sample);
-
-        juce::PopupMenu vAxis;
-        vAxis.addItem (CtxScaleSpecHz,     "Hz",      true, app.specFreqScaleMode == 0);
-        vAxis.addItem (CtxScaleSpecCustom, "Custom...", true, app.specFreqScaleMode == 1);
-
-        scaleMenu.addSubMenu ("Time Axis", timeAxis);
-        scaleMenu.addSubMenu ("Vertical Axis", vAxis);
-    }
+    // The Scale form: one dialog for every axis of this file. It replaces the
+    // old Scale submenu (Time Axis / Vertical Axis) and the Alternative Scale
+    // submenu: axes, units, offsets, scales, order and visibility are all in
+    // one place, and "Footer Only" is the old alternative-scale readout.
     m.addSeparator();
-    m.addSubMenu ("Scale", scaleMenu);
-
-    // Alternative Scale: any number of reference points per axis. "New"
-    // arms the ref-click flow and appends one; clicking a name edits it.
-    // No check marks: these are actions, not toggle states.
-    {
-        juce::PopupMenu altTime, altFreq;
-        altTime.addItem (CtxAltScaleTime, "New", true, false);
-        for (int i = 0; i < (int) app.altTimeRefs.size(); ++i)
-            altTime.addItem (CtxAltRefTimeBase + i, app.altTimeRefs[(size_t) i].name,
-                             true, false);
-        altFreq.addItem (CtxAltScaleFreq, "New", true, false);
-        for (int i = 0; i < (int) app.altFreqRefs.size(); ++i)
-            altFreq.addItem (CtxAltRefFreqBase + i, app.altFreqRefs[(size_t) i].name,
-                             true, false);
-
-        juce::PopupMenu alt;
-        alt.addSubMenu ("Time", altTime);
-        alt.addSubMenu ("Frequency", altFreq);
-        m.addSeparator();
-        m.addSubMenu ("Alternative Scale", alt);
-    }
+    m.addItem (CtxScaleForm, "Scale...", true, false);
+    // The file this document came from (a brand-new document has none yet).
+    const bool hasPath = app.doc() != nullptr
+                         && ! app.doc()->file.getFullPathName().isEmpty();
+    m.addItem (CtxOpenFolder, "Open Containing Folder", hasPath, false);
 
     // Frequency-axis extras: an "FFT Size" submenu with the size ladder
     // (same steps and shortcuts as Alt+Shift+= / Alt+Shift+-), an "Auto (N)"
@@ -1182,10 +1151,13 @@ SpectralView::PngExportJob SpectralView::preparePngExport (const juce::File& fil
     // The export canvas follows the current axis/ruler placement (View
     // menu); with axes, the axis strip and the time ruler are added on
     // whichever side they currently sit.
-    const int ox = (opts.axes && !axisOnRight()) ? kLeftAxisWidth : 0;
-    const int oy = (opts.axes && !rulerAtBottom()) ? kRulerH : 0;
-    const int W = pw + (opts.axes ? kLeftAxisWidth : 0);
-    const int H = ph + (opts.axes ? kRulerH : 0);
+    // An export always carries its own ruler (independent of a stacked live
+    // view, which hides its ruler because the other view draws it).
+    const int exportRuler = app.rulerStackHeight();
+    const int ox = (opts.axes && !axisOnRight()) ? axisW() : 0;
+    const int oy = (opts.axes && !rulerAtBottom()) ? exportRuler : 0;
+    const int W = pw + (opts.axes ? axisW() : 0);
+    const int H = ph + (opts.axes ? exportRuler : 0);
 
     // Overlays are cheap: compose them now into a transparent layer laid
     // over the spectral plot by the job. For this block only, plotRect() /
@@ -1198,7 +1170,7 @@ SpectralView::PngExportJob SpectralView::preparePngExport (const juce::File& fil
         overlay = juce::Image (juce::Image::ARGB, W, H, true, juce::SoftwareImageType());
         haveExportLayout_ = true;
         exportLayout_ = juce::Rectangle<int> (ox, oy, pw, ph);
-        exportRulerH_ = opts.axes ? kRulerH : 0;
+        exportRulerH_ = opts.axes ? app.rulerStackHeight() : 0;
         {
             juce::Graphics g (overlay);
             if (opts.axes)
@@ -1206,9 +1178,9 @@ SpectralView::PngExportJob SpectralView::preparePngExport (const juce::File& fil
                 // Opaque ruler background so the labels stay readable over the spectrum.
                 g.setColour (juce::Colour::fromRGB (32, 32, 36));
                 if (axisOnRight())
-                    g.fillRect (W - kLeftAxisWidth, 0, kLeftAxisWidth, H);
+                    g.fillRect (W - axisW(), 0, axisW(), H);
                 else
-                    g.fillRect (0, 0, kLeftAxisWidth, H);
+                    g.fillRect (0, 0, axisW(), H);
                 drawFrequencyRuler (g);
                 drawTimeRuler (g);
                 drawChannelLabels (g, false);   // an export never carries the mute state
@@ -1425,9 +1397,9 @@ void SpectralView::paint (juce::Graphics& g)
     // Opaque ruler background so the labels stay readable over the spectrum.
     g.setColour (juce::Colour::fromRGB (32, 32, 36));
     if (axisOnRight())
-        g.fillRect (getWidth() - kLeftAxisWidth, 0, kLeftAxisWidth, getHeight());
+        g.fillRect (getWidth() - axisW(), 0, axisW(), getHeight());
     else
-        g.fillRect (0, 0, kLeftAxisWidth, getHeight());
+        g.fillRect (0, 0, axisW(), getHeight());
     drawFrequencyRuler (g);
     drawThirdOctaveGrid (g);
     drawTimeRuler (g);
@@ -1453,10 +1425,10 @@ void SpectralView::paint (juce::Graphics& g)
         const bool startOnAxis  = onAxisX (dragStartX);
         const bool startOnRuler = !startOnAxis && onRulerY (dragStartY);
         if (startOnAxis)
-            zr = juce::Rectangle<int> (axisOnRight() ? getWidth() - kLeftAxisWidth : 0,
-                                       zr.getY(), kLeftAxisWidth, zr.getHeight());
+            zr = juce::Rectangle<int> (axisOnRight() ? getWidth() - axisW() : 0,
+                                       zr.getY(), axisW(), zr.getHeight());
         else if (startOnRuler)
-            zr = juce::Rectangle<int> (zr.getX(), rulerAtBottom() ? getHeight() - kRulerH : 0,
+            zr = juce::Rectangle<int> (zr.getX(), rulerAtBottom() ? getHeight() - rulerH() : 0,
                                        zr.getWidth(), rulerH());
 
         g.setColour (juce::Colour::fromRGBA (70, 130, 255, 80));
@@ -1605,51 +1577,65 @@ void SpectralView::drawTimeRuler (juce::Graphics& g)
 
     // The ruler strip sits at the top by default or at the bottom when moved
     // there via the View menu; ticks point from the plot edge into it.
-    // Relative to the plot rect so offscreen exports lay out identically.
-    const int rulerTop = rulerAtBottom() ? pr.getBottom() : pr.getY() - kRulerH;
-    const float sepY   = rulerAtBottom() ? (float) (rulerTop + 1) : (float) (pr.getY() - 1);
+    // Relative to the plot rect so offscreen exports lay out identically. The
+    // stack holds the main ruler plus one narrower strip per extra time axis.
+    const int stackH = rulerH();
+    const auto mainStrip = sc::axes::timeStrip (0, pr.getX(), pr.getWidth(),
+                                                pr.getY(), pr.getBottom(), stackH,
+                                                rulerAtBottom());
+    const int rulerTop = mainStrip.getY();
+    const int rulerHgt = mainStrip.getHeight();
+    const float sepY   = rulerAtBottom() ? (float) (mainStrip.getY() + 1)
+                                         : (float) (pr.getY() - 1);
     const float tickEnd   = rulerAtBottom() ? sepY + 7.0f : sepY - 7.0f;
     const float minorEnd  = rulerAtBottom() ? sepY + 3.0f : sepY - 3.0f;
 
-    // Opaque background so the labels stay readable over the spectrum.
-    g.setColour (juce::Colour::fromRGB (32, 32, 36));
-    g.fillRect (pr.getX(), rulerTop, pr.getWidth(), rulerH());
+    // Opaque background so the labels stay readable over the spectrum - over
+    // the strip itself, which is below the plot when the ruler is at the
+    // bottom and above it when the ruler is at the top. Painting it at
+    // plotTop - stackH in the bottom case covered the top of the spectrogram
+    // and left the ruler area unpainted (a black bar).
+    const int stackTop = rulerAtBottom() ? pr.getBottom()
+                                         : pr.getY() - stackH;
+    g.setColour (sc::axes::axisStripFill());
+    g.fillRect (pr.getX(), stackTop, pr.getWidth(), stackH);
 
-    // Ticks are placed at nice values of the DISPLAYED axis: seconds for
-    // Time/TimeOffset, sample counts for Sample.
+    // Ticks are placed at nice values of the DISPLAYED axis: seconds for the
+    // time modes, sample counts for Sample.
     const double pxPerSec = pr.getWidth() / w;
     const TimeAxisMode mode = app.timeAxisMode;
     const double off = app.timeOffsetSecs;
+    const double sc  = (app.timeScaleFactor != 0.0 ? app.timeScaleFactor : 1.0);
     const double rate = std::max (1.0, app.audioEngine().sampleRate());
 
-    auto dispToTime = [mode, off, rate] (double d) -> double
+    auto dispToTime = [mode, off, rate, sc] (double d) -> double
     {
-        switch (mode)
-        {
-            case TimeAxisMode::Sample:     return d / rate;
-            case TimeAxisMode::TimeOffset: return d - off;
-            default:                       return d;
-        }
+        if (mode == TimeAxisMode::Sample)
+            return (d / sc) / rate - off;
+        return (d / sc) - off;
     };
 
-    const double dispStart = timeToDisplayValue (viewStart, mode, off, rate);
-    const double dispEnd   = timeToDisplayValue (viewEnd,   mode, off, rate);
+    const double dispStart = timeToDisplayValue (viewStart, mode, off, rate, sc);
+    const double dispEnd   = timeToDisplayValue (viewEnd,   mode, off, rate, sc);
+    const double pxPerUnit = pxPerSec * sc;
     const double major = (mode == TimeAxisMode::Sample)
-                         ? niceSampleStep (rate / pxPerSec) : niceTimeStep (pxPerSec);
+                         ? niceSampleStep ((rate / pxPerSec) * sc)
+                         : niceTimeStep (pxPerUnit);
     // Subdivide each major interval into five when there is room for it.
     // (In Sample mode `major` counts samples, so convert to pixels first.)
     const double majorPx = (mode == TimeAxisMode::Sample)
-                           ? (major / rate) * pxPerSec : major * pxPerSec;
+                           ? (major / (rate * sc)) * pxPerSec : major * pxPerUnit;
     const bool showMinors = majorPx >= 40.0;
 
-    g.setColour (juce::Colour::fromRGB (60, 60, 60));
+    g.setColour (sc::axes::axisGridColour());
     g.drawLine ((float) pr.getX(), sepY, (float) pr.getRight(), sepY, 1.0f);
 
     const double first = std::ceil (dispStart / major) * major;
     if (first > dispEnd + 1e-9)
         return;   // the visible span is shorter than one tick step
 
-    g.setFont (10.0f);
+    g.setFont (sc::axes::axisLabelFont());
+    std::vector<std::pair<float, double>> axisTicks;   // x -> real seconds
     const int nTicks = (int) std::floor ((dispEnd - first) / major + 1e-9) + 1;
     for (int i = 0; i < nTicks; ++i)
     {
@@ -1658,8 +1644,9 @@ void SpectralView::drawTimeRuler (juce::Graphics& g)
         const double t = dispToTime (d);
         if (t < viewStart - 1e-9 || t > viewEnd + 1e-9) continue;
         const float x = timeToX (t);
+        axisTicks.push_back ({ x, t });
 
-        g.setColour (juce::Colour::fromRGB (60, 60, 60));
+        g.setColour (sc::axes::axisGridColour());
         g.drawLine (x, std::min (sepY, tickEnd), x, std::max (sepY, tickEnd), 1.0f);
 
         if (showMinors)
@@ -1675,13 +1662,28 @@ void SpectralView::drawTimeRuler (juce::Graphics& g)
         switch (mode)
         {
             case TimeAxisMode::Sample:     label = juce::String ((int64_t) std::llround (d)); break;
+            case TimeAxisMode::Seconds:    label = juce::String (d, 4); break;
             case TimeAxisMode::TimeOffset: label = formatClockTime (d, 4); break;
             default:                       label = formatTimeTickLabel (d, major, w); break;
         }
 
-        g.setColour (juce::Colour::fromRGB (200, 200, 200));
-        g.drawText (label, (int) x + 3, rulerTop + 2, 90, rulerH() - 4,
+        g.setColour (sc::axes::axisLabelColour());
+        // Below the ticks when the ruler hangs under the plot (its ticks point
+        // down from the top edge); at the top of the strip otherwise.
+        const int labelY = rulerAtBottom() ? rulerTop + 9 : rulerTop + 2;
+        const int labelH = std::max (10, rulerHgt - (rulerAtBottom() ? 11 : 4));
+        g.drawText (label, (int) x + 3, labelY, 90, labelH,
                     juce::Justification::centredLeft, false);
+    }
+
+    int index = 1;
+    for (const auto& e : sc::axes::extras (app.axisEntries, sc::axes::Kind::Time))
+    {
+        const auto strip = sc::axes::timeStrip (index, pr.getX(), pr.getWidth(),
+                                                pr.getY(), pr.getBottom(), stackH,
+                                                rulerAtBottom());
+        sc::axes::drawExtraTimeAxis (g, e, strip, axisTicks, rate);
+        ++index;
     }
 }
 
@@ -1714,7 +1716,17 @@ void SpectralView::drawFrequencyRuler (juce::Graphics& g)
     const bool hasChanLabel = (channels.size() > 1 || app.audioEngine().numChannels() == 2);
 
     const auto rows = rowRects ();
-    g.setFont (10.0f);
+    g.setFont (sc::axes::axisLabelFont());
+    std::vector<std::pair<float, double>> axisTicks;   // y -> Hz, reused by the extra axes
+
+    // The main axis labels stay inside the main strip (nearest the plot); the
+    // outermost one is inset by the room the channel label needs.
+    const sc::axes::List freqExtras = sc::axes::extras (app.axisEntries, sc::axes::Kind::Frequency);
+    const int nFreq = 1 + (int) freqExtras.size();
+    const auto mainLab = sc::axes::verticalLabelRect (0, nFreq, axisW(), plotRect().getX(),
+                                                      layoutWidth() - (axisOnRight() ? axisW() : 0),
+                                                      plotRect().getY(), plotRect().getBottom(),
+                                                      axisOnRight(), sc::axes::channelGutter());
 
     for (const auto& rr : rows)
     {
@@ -1727,15 +1739,15 @@ void SpectralView::drawFrequencyRuler (juce::Graphics& g)
             const float y = (float) rr.getY() + freqToY (f, rr.getHeight());
             // Grid line spans the plot only; labels sit in the axis strip on
             // whichever side it is placed.
-            const float tickX0 = axisOnRight() ? 0.0f : (float) kLeftAxisWidth;
-            const float tickX1 = axisOnRight() ? (float) (layoutWidth() - kLeftAxisWidth)
+            const float tickX0 = axisOnRight() ? 0.0f : (float) axisW();
+            const float tickX1 = axisOnRight() ? (float) (layoutWidth() - axisW())
                                                : (float) layoutWidth();
             // The grey grid line can be hidden from the View menu; the axis
-            // labels below are unaffected.
+            // labels below are unaffected. Same colour as the other tracks.
             if (app.settings.showFreqGrid)
             {
-                g.setColour (minor ? juce::Colour::fromRGB (48, 48, 52)
-                                   : juce::Colour::fromRGB (60, 60, 60));
+                g.setColour (minor ? sc::axes::axisGridColour().darker (0.35f)
+                                   : sc::axes::axisGridColour());
                 g.drawLine (tickX0, y, tickX1, y, 1.0f);
             }
             if (!showLabels || !withLabel) return;
@@ -1746,12 +1758,14 @@ void SpectralView::drawFrequencyRuler (juce::Graphics& g)
             // edge); keep the tick line itself.
             if ((float) y < rr.getY() + 13.0f || (float) y > rr.getBottom() - 1.0f)
                 return;
-            g.setColour (minor ? juce::Colour::fromRGB (130, 130, 138)
-                               : juce::Colour::fromRGB (200, 200, 200));
+            g.setColour (minor ? sc::axes::axisMinorLabelColour()
+                               : sc::axes::axisLabelColour());
             const double factor = (app.specFreqScaleMode == 1) ? app.specFreqFactor : 1.0;
+            if (! minor) axisTicks.push_back ({ y, f });
+            // Each axis keeps to its own strip: an extra frequency axis used to
+            // be drawn on top of these labels on the left side.
             g.drawText (formatFreqAxisLabel (f, factor),
-                       axisOnRight() ? layoutWidth() - kLeftAxisWidth + 2 : 4,
-                       (int) y - 12, kLeftAxisWidth - 6, 12,
+                       mainLab.getX(), (int) y - 12, mainLab.getWidth(), 12,
                        juce::Justification::bottomLeft, false);
         };
 
@@ -1849,6 +1863,38 @@ void SpectralView::drawFrequencyRuler (juce::Graphics& g)
                 drawTickAndLabel (fMin + (fMax - fMin) * i / nTicks);
         }
     }
+
+    // Extra frequency axes: the same tick positions, labelled in each entry's
+    // own units, in the strips further out. The engine renders one frequency
+    // window for every channel row, so a frequency axis is always shared.
+    if (axisTicks.empty()) return;
+    const int axW = axisW();
+    int index = 1;
+    for (const auto& e : freqExtras)
+    {
+        const auto strip = sc::axes::verticalStrip (index, axW, plotRect().getX(),
+                                                    layoutWidth() - (axisOnRight() ? axW : 0),
+                                                    plotRect().getY(), plotRect().getBottom(),
+                                                    axisOnRight());
+        if (axisOnRight() ? strip.getRight() > layoutWidth() : strip.getX() < 0) break;
+
+        // Secondary axis: the same smaller type the extra time axes use.
+        g.setFont (juce::Font { juce::FontOptions (8.5f) });
+        g.setColour (sc::axes::axisMinorLabelColour());
+        const auto lab = sc::axes::verticalLabelRect (index, nFreq, axW, plotRect().getX(),
+                                                      layoutWidth() - (axisOnRight() ? axW : 0),
+                                                      plotRect().getY(), plotRect().getBottom(),
+                                                      axisOnRight(), sc::axes::channelGutter());
+        for (const auto& t : axisTicks)
+        {
+            const auto box = juce::Rectangle<int> (lab.getX(), (int) t.first - 12, lab.getWidth(), 12);
+            // With the unit spelled out: an extra axis in Hz must read as Hz.
+            g.drawText (sc::axes::formatFrequencyAxis (e, t.second, rate * 0.5), box,
+                        axisOnRight() ? juce::Justification::bottomLeft
+                                      : juce::Justification::bottomRight, true);
+        }
+        ++index;
+    }
 }
 
 std::optional<float> SpectralView::thirdOctaveLabelY (float yc, float topY, float botY,
@@ -1911,8 +1957,8 @@ void SpectralView::drawThirdOctaveGrid (juce::Graphics& g)
     // frequencies; the outermost visible bands fall back to the range edges.
     auto border = [] (double a, double b) { return std::sqrt (a * b); };
 
-    const float x0 = axisOnRight() ? 0.0f : (float) kLeftAxisWidth;
-    const float x1 = axisOnRight() ? (float) (layoutWidth() - kLeftAxisWidth)
+    const float x0 = axisOnRight() ? 0.0f : (float) axisW();
+    const float x1 = axisOnRight() ? (float) (layoutWidth() - axisW())
                                    : (float) layoutWidth();
     // The centre label sits just inside the plot, on the same side as the
     // vertical frequency axis.
@@ -2317,13 +2363,14 @@ void SpectralView::estimateTextExtent (int px, int py, const juce::String& text,
 void SpectralView::drawChannelLabels (juce::Graphics& g, bool showMuteState)
 {
     const auto rows = rowRects ();
-    g.setFont (10.0f);
+    g.setFont (13.0f);   // the same size the waveform uses: both say which track
     for (size_t r = 0; r < rows.size() && r < channels.size(); ++r)
     {
         const int ch = channels[r];
         const auto& rr = rows[r];
         const bool muted = showMuteState && app.audioEngine().isChannelMuted (ch);
-        g.setColour (muted ? juce::Colour::fromRGB (255, 80, 80) : juce::Colour::fromRGB (190, 190, 190));
+        g.setColour (muted ? juce::Colour::fromRGB (255, 80, 80)
+                           : juce::Colour::fromRGB (215, 215, 220));
         // Centred in a slightly wider box: never clipped by a metrics difference.
         g.drawText (channelLabel (ch), channelLabelBounds (ch, rr.getY() + rr.getHeight() / 2).expanded (4, 0),
                     juce::Justification::centred, false);
@@ -2338,12 +2385,13 @@ juce::String SpectralView::channelLabel (int ch) const
 
 juce::Rectangle<int> SpectralView::channelLabelBounds (int ch, int centreY) const
 {
-    const juce::Font f (juce::FontOptions (10.0f));   // the label's g.setFont (10.0f)
+    const juce::Font f (juce::FontOptions (13.0f));   // the label's g.setFont (13.0f)
     const int textW = (int) std::ceil (juce::GlyphArrangement::getStringWidth (f, channelLabel (ch)));
-    // Right edge of the axis strip in both placements: clear of the
-    // frequency tick labels on the other side of the strip.
-    const int right = axisOnRight() ? layoutWidth() - 2 : kLeftAxisWidth - 2;
-    return { right - textW, centreY - 8, textW, 16 };
+    // At the OUTER edge of the axis area: left of the frequency units when the
+    // axis is on the left, right of them when it is on the right. The axis
+    // keeps sc::axes::channelGutter() px there for exactly this.
+    const int x = axisOnRight() ? layoutWidth() - 2 - textW : 2;
+    return { x, centreY - 10, textW, 20 };
 }
 
 juce::String SpectralView::getTooltip()

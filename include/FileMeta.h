@@ -9,6 +9,7 @@
 #pragma once
 
 #include "DrawingItem.h"      // DrawingItem
+#include "AxisScale.h"        // sc::axes::Entry (the Scale form)
 #include "MarkerManager.h"     // Marker
 #include "SavedSelections.h"   // SavedSpectralSelection
 #include "ScaleCalibration.h"  // ScaleCalibration
@@ -110,6 +111,12 @@ struct MetaBundle
     FreqAnalysisState freqAnalysis;
     ScttData transcription;   // only serialised in external mode
 
+    /** Axis entries of the Scale form (time / amplitude / frequency axes).
+        Written as the "axes" array; read back from it when present, otherwise
+        rebuilt from the legacy "scale" / "altRef" fields so existing files keep
+        their calibration and alternative scales (see sc::axes::migrateLegacy). */
+    std::vector<sc::axes::Entry> axes;
+
     // Tables panel: imported CSV tables with per-parameter alignment, plus
     // the display mode (0=Overlay on Waveform 1=Overlay on Spectrogram
     // 2=Dedicated track).
@@ -126,7 +133,8 @@ struct MetaBundle
         document (used to merge bundles from several sources). */
     bool haveMarkers = false, haveSelections = false, haveDrawings = false,
          haveScale = false, haveAltRef = false, haveFreqAnalysis = false,
-         haveTranscription = false, haveTables = false, haveVideoTracks = false;
+         haveTranscription = false, haveTables = false, haveVideoTracks = false,
+         haveAxes = false;
 
     /** True when the bundle holds anything worth persisting. */
     bool hasContent() const
@@ -134,7 +142,7 @@ struct MetaBundle
         return !markers.empty() || !selections.empty() || !drawings.empty()
             || scale.isCalibrated() || !altRef.isDefault()
             || !freqAnalysis.isDefault() || !tables.empty()
-            || !videoTracks.empty();
+            || !videoTracks.empty() || !axes.empty();
     }
 };
 
