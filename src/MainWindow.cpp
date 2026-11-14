@@ -5687,11 +5687,21 @@ juce::AlertWindow* MainWindow::createAltRefEditDialog (bool isFreq, int index)
     w->addTextEditor ("name", r.name);
     w->addTextEditor (mainId, juce::String (r.refMain, isFreq ? 1 : 4));
     w->addTextEditor ("altValue", juce::String (r.altValue, 3));
+    if (auto* e = w->getTextEditor ("name"))
+        e->setTooltip ("Name of this scale, shown in the readout.");
+    if (auto* e = w->getTextEditor (mainId))
+        e->setTooltip (isFreq ? "Reference frequency, in Hz." : "Reference time, in seconds.");
+    if (auto* e = w->getTextEditor ("altValue"))
+        e->setTooltip (isFreq ? "Value of this scale at the reference frequency. The scale is "
+                                "proportional to the frequency."
+                              : "Value of this scale at the reference time. The scale is "
+                                "proportional to the time.");
 
     auto* vis = new juce::ToggleButton ();
     vis->setComponentID ("altref-visible");
     vis->setButtonText ("Show in mouse readout");
     vis->setToggleState (r.enabled, juce::dontSendNotification);
+    vis->setTooltip ("Show this scale's value next to the mouse position readout.");
     w->addCustomComponent (vis);
 
     w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
@@ -5810,11 +5820,16 @@ juce::AlertWindow* MainWindow::createGoToTimeDialog ()
                       formatDisplayedTime (app.playhead, app.timeAxisMode,
                                            app.timeOffsetSecs, rate));
 
+    if (auto* e = w->getTextEditor (fields.mainId))
+        e->setTooltip ("Time to go to, in the time axis's current format.");
+
     for (const auto& a : fields.alts)
     {
         const auto& r = app.altTimeRefs[(size_t) a.first];
         w->addTextEditor (a.second,
                           juce::String (Application::altScaleValue (r, app.playhead), 3));
+        if (auto* e = w->getTextEditor (a.second))
+            e->setTooltip ("Time to go to, as a value of the scale " + r.name + ".");
     }
 
     w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
@@ -5943,6 +5958,8 @@ juce::AlertWindow* MainWindow::createGainDialog()
                                      "Apply gain to the selection (dB):",
                                      juce::AlertWindow::QuestionIcon, this);
     w->addTextEditor ("gainDb", "0.0");
+    if (auto* e = w->getTextEditor ("gainDb"))
+        e->setTooltip ("Gain in dB: negative values make the selection quieter.");
 
     // Slider below the text box: -60..+24 dB in 0.1 steps. The text box stays
     // authoritative — OK applies whatever is typed; the slider simply clamps
@@ -5952,6 +5969,8 @@ juce::AlertWindow* MainWindow::createGainDialog()
     slider->setRange (-60.0, 24.0, 0.1);
     slider->setValue (0.0, juce::dontSendNotification);
     slider->setSize (280, 30);
+    slider->setTooltip ("Drag to set the gain, -60 to +24 dB. A typed value can go beyond "
+                        "this range.");
 
     if (auto* editor = w->getTextEditor ("gainDb"))
     {
@@ -6285,6 +6304,7 @@ public:
             chk->setButtonText (chName);
             chk->setClickingTogglesState (true);
             chk->onClick = [this] { refreshDestStates (); };
+            chk->setTooltip ("Extract the spectral selection from this channel.");
             auto* dst = new juce::TextEditor();
             dst->setMultiLine (false);
             dst->setTooltip ("Destination channel number: an existing "
@@ -6299,12 +6319,17 @@ public:
 
         const char* presetTexts[3] = { "All Tracks", "Last channel into new",
                                        "Second last into last" };
+        const char* presetTips[3] = {
+            "Extract from every channel, each into a new channel of its own.",
+            "Extract from the last channel only, into a new channel.",
+            "Extract from the second-last channel and mix it into the last one." };
         for (int i = 0; i < 3; ++i)
         {
             auto* b = new juce::TextButton (presetTexts[i]);
             b->setButtonText (presetTexts[i]);
             const int preset = i;
             b->onClick = [this, preset] { applyPreset (preset); };
+            b->setTooltip (presetTips[i]);
             addAndMakeVisible (b);
             presets_.push_back (b);
         }
@@ -6585,6 +6610,8 @@ juce::AlertWindow* MainWindow::createGenerateNoiseDialog()
     typeCombo->addItem ("Brown noise", 3);
     typeCombo->setSelectedId (1, juce::dontSendNotification);   // default: white
     typeCombo->setSize (200, 28);
+    typeCombo->setTooltip ("White: flat spectrum. Pink: -3 dB per octave. Brown: -6 dB per "
+                           "octave (deeper rumble).");
     w->addCustomComponent (typeCombo);
 
     // Intensity slider + Average Level button in one row.
@@ -6596,6 +6623,7 @@ juce::AlertWindow* MainWindow::createGenerateNoiseDialog()
     intensity->setRange (0.0, 1.0, 0.01);
     intensity->setValue (0.25, juce::dontSendNotification);
     intensity->setBounds (0, 0, 214, 30);
+    intensity->setTooltip ("Peak amplitude of the noise, 0 to 1 (1 = full scale).");
     auto* avgBtn = new juce::TextButton ("Average Level");
     avgBtn->setBounds (220, 1, 118, 26);
     avgBtn->setTooltip ("Set the intensity so the generated noise matches the "
@@ -6711,6 +6739,7 @@ juce::AlertWindow* MainWindow::createGenerateToneDialog()
     waveCombo->addItem ("Triangle", 4);
     waveCombo->setSelectedId (1, juce::dontSendNotification);   // default: sine
     waveCombo->setSize (200, 28);
+    waveCombo->setTooltip ("Wave shape used for every tone below.");
     w->addCustomComponent (waveCombo);
 
     auto* tones = new ToneListEditor();
@@ -6945,6 +6974,9 @@ CatTimeScalePanel::CatTimeScalePanel (double refDurationSecs)
     modeCombo_->addItem ("Time Stretch", 1);
     modeCombo_->addItem ("Reduce Gaps", 2);
     modeCombo_->addItem ("Export Variation", 3);
+    modeCombo_->setTooltip ("Time Stretch: change the length by cutting or repeating stable "
+                            "segments. Reduce Gaps: remove the most stable gaps. Export "
+                            "Variation: write the spectral change of each gap to a new table.");
 
     durRow_ = new LabeledField ("Time Duration:", formatWeightText (refDur_),
         "New length of the audio in seconds.");
@@ -7243,6 +7275,7 @@ juce::AlertWindow* MainWindow::createFilterEqDialog()
     auto* presetCombo = new juce::ComboBox ();
     presetCombo->setName ("Preset");
     presetCombo->setBounds (0, 0, 218, 26);
+    presetCombo->setTooltip ("Load a built-in or saved curve.");
     auto* addBtn = new juce::TextButton ("Add...");
     addBtn->setBounds (224, 0, 62, 26);
     addBtn->setTooltip ("Save the current curve as a named preset.");
@@ -7490,6 +7523,7 @@ juce::AlertWindow* MainWindow::createEnvelopeDialog()
     auto* presetCombo = new juce::ComboBox ();
     presetCombo->setName ("Preset");
     presetCombo->setBounds (0, 0, 218, 26);
+    presetCombo->setTooltip ("Load a built-in or saved curve.");
     auto* addBtn = new juce::TextButton ("Add...");
     addBtn->setBounds (224, 0, 62, 26);
     addBtn->setTooltip ("Save the current curve as a named preset.");
@@ -7998,6 +8032,10 @@ void MainWindow::showNewFileDialog()
                                      juce::AlertWindow::QuestionIcon, this);
     w->addTextEditor ("channels", juce::String (defChans));
     w->addTextEditor ("rate", juce::String (defRate, 3));
+    if (auto* e = w->getTextEditor ("channels"))
+        e->setTooltip ("Number of channels of the new file.");
+    if (auto* e = w->getTextEditor ("rate"))
+        e->setTooltip ("Sample rate of the new file, in Hz.");
     for (const char* name : { "channels", "rate" })
         if (auto* editor = w->getTextEditor (name))
             // Let Enter/Escape reach the OK/Cancel shortcuts even while a
@@ -8341,6 +8379,9 @@ juce::AlertWindow* MainWindow::createNoiseSuppressDialog()
     // Default 100 = no attenuation limit (full noise suppression), matching
     // Audacity's default for this parameter.
     w->addTextEditor ("attenLim", "100", "Attenuation limit dB (100 = no limit)");
+    if (auto* e = w->getTextEditor ("attenLim"))
+        e->setTooltip ("Most the noise may be reduced, in dB. A lower value keeps more of the "
+                       "original sound; 100 = no limit.");
 
     w->addComboBox ("autoDl", juce::StringArray { "Yes", "No" },
                     "Auto-download model if missing");

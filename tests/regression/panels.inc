@@ -923,6 +923,96 @@ static void regrPanels_tableFromSpectralSelection()
     store.deleteFile ();
 }
 
+// Issue #12: every control a user can see carries a tooltip. Walks the main
+// window, every dockable panel and the tool windows; a control counts when it
+// and its parents are visible (state-hidden controls are skipped), and JUCE's
+// internal parts (scroll bar buttons, a combo's label, a slider's text box,
+// table headers) are not controls of their own.
+static void collectControlsWithoutTooltip (juce::Component& c, const juce::String& path,
+                                           juce::StringArray& out, int& numControls)
+{
+    if (! c.isVisible ())
+        return;
+    if (dynamic_cast<juce::ScrollBar*> (&c) != nullptr
+        || dynamic_cast<juce::TableHeaderComponent*> (&c) != nullptr)
+        return;
+
+    const bool isControl = dynamic_cast<juce::Button*> (&c) != nullptr
+                        || dynamic_cast<juce::ComboBox*> (&c) != nullptr
+                        || dynamic_cast<juce::Slider*> (&c) != nullptr
+                        || (dynamic_cast<juce::TextEditor*> (&c) != nullptr
+                            && ! static_cast<juce::TextEditor&> (c).isReadOnly ());
+    if (isControl)
+    {
+        ++numControls;
+        auto* tc = dynamic_cast<juce::TooltipClient*> (&c);
+        if (tc == nullptr || tc->getTooltip ().trim ().isEmpty ())
+        {
+            juce::String what = c.getName ();
+            if (auto* b = dynamic_cast<juce::Button*> (&c)) what = b->getButtonText ();
+            out.add (path + " > " + juce::String (typeid (c).name ()) + " '" + what + "'");
+        }
+        return;   // a control's own children (combo label, slider text box) are its parts
+    }
+    for (auto* child : c.getChildren ())
+        collectControlsWithoutTooltip (*child, path, out, numControls);
+}
+
+static void regrPanels_everyControlHasATooltip()
+{
+    progress ("regression panels: every visible control has a tooltip (#12)");
+    const juce::File store = makeTempFile ("tooltips_all.recent");
+    store.deleteFile ();
+    const juce::File wav = makeTempFile ("tooltips_all.wav");
+    writeWav (wav, 2, 8000.0, 8000, [] (int, int64_t f, double)
+    {
+        return (float) (0.3 * std::sin (juce::MathConstants<double>::twoPi * 440.0 * (double) f / 8000.0));
+    });
+    {
+        Application app (store);
+        CHECK (app.openFile (wav), "tooltips: the wav opens");
+        std::unique_ptr<MainWindow> win (new MainWindow (app, "tooltips test"));
+        win->setSize (1400, 900);
+        app.setSelection ({ 0.2, 0.6 });   // shows the status bar time fields
+
+        juce::StringArray missing;
+        int numControls = 0;
+        collectControlsWithoutTooltip (*win, "MainWindow", missing, numControls);
+        for (const char* id : { "editor", "files", "fft", "history", "python", "controls", "markers",
+                                "transcription", "selection", "drawing", "tables", "actions", "video" })
+            if (auto* panel = win->panelForId (id))
+            {
+                panel->setSize (std::max (panel->getWidth (), 360), std::max (panel->getHeight (), 500));
+                collectControlsWithoutTooltip (*panel, id, missing, numControls);
+            }
+
+        win->showStemSeparationWindow ();
+        if (auto* w = win->stemSepWindow ())
+            collectControlsWithoutTooltip (*w, "Stem Separation", missing, numControls);
+        win->showSuperResolutionWindow ();
+        if (auto* w = win->superResWindow ())
+            collectControlsWithoutTooltip (*w, "Super Resolution", missing, numControls);
+
+        {
+            ActionEditWindow w (app, -1);
+            collectControlsWithoutTooltip (w, "Edit Action", missing, numControls);
+        }
+        {
+            ActionBatchWindow w (app, -1);
+            collectControlsWithoutTooltip (w, "Action Batch", missing, numControls);
+        }
+        {
+            TablesColourDialog w ("Colour", 0, {});
+            collectControlsWithoutTooltip (w, "Table colour", missing, numControls);
+        }
+
+        CHECK (numControls > 60, "tooltips: the walk reaches the controls (" + juce::String (numControls) + ")");
+        CHECK (missing.isEmpty (), "tooltips: controls without a tooltip:\n  " + missing.joinIntoString ("\n  "));
+    }
+    wav.deleteFile ();
+    store.deleteFile ();
+}
+
 static void runRegression_panels()
 {
     regrPanels_pythonAddDialog();
@@ -938,4 +1028,5 @@ static void runRegression_panels()
     regrPanels_tablesPlotPlayheadAndSplitter();
     regrPanels_statusBarChannelNumbers();
     regrPanels_tableFromSpectralSelection();
+    regrPanels_everyControlHasATooltip();
 }

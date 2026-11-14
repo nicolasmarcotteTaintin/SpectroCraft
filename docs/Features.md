@@ -2049,7 +2049,9 @@ Menus: **File, Edit, Selection, Transport, Effects, View, Window, Help** (the
 Window menu holds the **Workspaces** submenu and **Maximize Panel Group**,
 opens/closes the individual panels — **Video** included — and carries the **Allow multiple
 instances** toggle — see above; the **Help** menu holds **Show Tooltips** (on by default,
-remembered: off hides every hover tip in all windows), the **Diagnostic Log** toggle and its
+remembered: off hides every hover tip in all windows; every button, list, slider and text field
+of the panels and tool windows has one, as do the panel tabs, the workspace bar and the channel
+labels of the views), the **Diagnostic Log** toggle and its
 folder, summary and support-bundle actions). The Edit menu has a
 checkable **Snap to Zero Crossings** toggle (**off by default**): when on,
 dragging out a new time selection snaps both edges to the nearest zero
