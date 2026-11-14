@@ -87,10 +87,10 @@ void TablesTrackView::panValueByCursorY (int y)
 juce::Rectangle<int> TablesTrackView::plotRect() const
 {
     // Same horizontal layout as the data tracks: a value-axis strip of width
-    // kLeftAxisWidth on whichever side the View menu puts it; the plot fills
+    // axisW() on whichever side the View menu puts it; the plot fills
     // the rest (the scrollbar sits outside this component).
-    const int x0 = app.settings.trackAxisOnRight ? 0 : kAxisW;
-    return { x0, 0, std::max (1, getWidth() - kAxisW), std::max (1, getHeight()) };
+    const int x0 = app.settings.trackAxisOnRight ? 0 : axisW();
+    return { x0, 0, std::max (1, getWidth() - axisW()), std::max (1, getHeight()) };
 }
 
 double TablesTrackView::valueAtY (int y) const
@@ -156,12 +156,12 @@ void TablesTrackView::refit()
 
 juce::Rectangle<int> TablesTrackView::axisStripRect() const
 {
-    return { app.settings.trackAxisOnRight ? getWidth() - kAxisW : 0, 0, kAxisW, getHeight() };
+    return { app.settings.trackAxisOnRight ? getWidth() - axisW() : 0, 0, axisW(), getHeight() };
 }
 
 bool TablesTrackView::onAxisX (int x) const
 {
-    return app.settings.trackAxisOnRight ? x >= getWidth() - kAxisW : x < kAxisW;
+    return app.settings.trackAxisOnRight ? x >= getWidth() - axisW() : x < axisW();
 }
 
 // Fewer decimals for large magnitudes so big values stay readable in the
@@ -199,14 +199,15 @@ void TablesTrackView::paint (juce::Graphics& g)
         // the axis labels below are unaffected.
         if (app.settings.showDedicatedTrackGrid)
         {
-            g.setColour (juce::Colour::fromRGB (60, 60, 68));
+            g.setColour (sc::axes::axisGridColour());   // same grid as the other tracks
             // NOTE: this JUCE build's drawHorizontalLine takes (y, left, right).
             g.drawHorizontalLine ((int) y, (float) pr.getX(), (float) pr.getRight());
         }
-        g.setColour (juce::Colours::lightgrey);
+        g.setColour (sc::axes::axisLabelColour());
+        g.setFont (sc::axes::axisLabelFont());
         g.drawText (juce::String (v, valueDecimals (v)),
                    juce::Rectangle<int> (axisStrip.getX() + 2, y - 8,
-                    kAxisW - 6, 15), axRight ? juce::Justification::right
+                    axisW() - 6, 15), axRight ? juce::Justification::right
                                              : juce::Justification::left, true);
     }
 

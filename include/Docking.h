@@ -416,6 +416,12 @@ public:
         detached and its remembered spot dropped. */
     void unregisterPanel (const juce::String& id);
 
+    /* The owner may add its own entries to a panel's header menu (right-click
+       on a tab, or on the ⋯ button): MainWindow adds "Open Containing Folder"
+       and "Scale..." for the Editor. Ids handed out by the callback must be
+       above 1000 so they cannot collide with the docking ids. */
+    std::function<void (juce::PopupMenu& menu, const juce::String& panelId)> panelMenuExtender;
+
     DockArea& mainArea() noexcept { return *mainArea_; }
     const DockArea& mainArea() const noexcept { return *mainArea_; }
 

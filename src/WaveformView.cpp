@@ -110,27 +110,16 @@ static void showViewContextMenu (Application& app,
     m.addItem (CtxPasteMix, "Paste Mix\tCtrl+Shift+V", app.canPaste(), false);
     m.addItem (CtxDelete,"Delete\tDel",   hasSel, false);
 
-    // Scale menu: independent time-axis and vertical-axis scales.
-    juce::PopupMenu scaleMenu;
-    {
-        juce::PopupMenu timeAxis;
-        timeAxis.addItem (CtxScaleTimeTime,     "Time",           true,
-                          app.timeAxisMode == TimeAxisMode::Time);
-        timeAxis.addItem (CtxScaleTimeOffset,   "Time Offset...", true,
-                          app.timeAxisMode == TimeAxisMode::TimeOffset);
-        timeAxis.addItem (CtxScaleTimeSample,   "Sample",         true,
-                          app.timeAxisMode == TimeAxisMode::Sample);
-
-        juce::PopupMenu vAxis;
-        vAxis.addItem (CtxScaleWaveWavUnits, "Wav Units",  true, app.waveVScaleMode == 0);
-        vAxis.addItem (CtxScaleWaveDb,       "dB",         true, app.waveVScaleMode == 1);
-        vAxis.addItem (CtxScaleWaveNorm,     "Normalized", true, app.waveVScaleMode == 2);
-
-        scaleMenu.addSubMenu ("Time Axis", timeAxis);
-        scaleMenu.addSubMenu ("Vertical Axis", vAxis);
-    }
+    // The Scale form: one dialog for every axis of this file (name, units,
+    // offset, scale, order, visibility). It replaces the old Scale submenu and
+    // the Alternative Scale submenu, which could only reach a fixed set of
+    // built-in choices.
     m.addSeparator();
-    m.addSubMenu ("Scale", scaleMenu);
+    m.addItem (CtxScaleForm, "Scale...", true, false);
+    // The file this document came from (a brand-new document has none yet).
+    const bool hasPath = app.doc() != nullptr
+                         && ! app.doc()->file.getFullPathName().isEmpty();
+    m.addItem (CtxOpenFolder, "Open Containing Folder", hasPath, false);
 
     if (const int sel = m.showMenu (juce::PopupMenu::Options().withMousePosition());
         sel != 0)
@@ -145,12 +134,13 @@ juce::String WaveformView::channelLabel (int ch) const
 
 juce::Rectangle<int> WaveformView::channelLabelBounds (int ch, int centreY) const
 {
-    const juce::Font f (juce::FontOptions (10.0f));   // the label's g.setFont (10.0f)
+    const juce::Font f (juce::FontOptions (13.0f));   // the label's g.setFont (13.0f)
     const int textW = (int) std::ceil (juce::GlyphArrangement::getStringWidth (f, channelLabel (ch)));
-    // Axis on the left: its outer edge (the dB/zero tick labels hug the
-    // plot). Axis on the right: its right edge (the ticks start at its left).
+    // At the OUTER edge of the axis area: left of the unit labels when the
+    // axis is on the left, right of them when it is on the right. The axis
+    // keeps sc::axes::channelGutter() px there for exactly this.
     const int x = axisOnRight() ? getWidth() - 2 - textW : 2;
-    return { x, centreY - 8, textW, 16 };
+    return { x, centreY - 10, textW, 20 };
 }
 
 int WaveformView::channelAtLabel (juce::Point<int> p) const
@@ -210,6 +200,35 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
             app.clickChannelMute (ch, e.mods.isCommandDown());
             return;
         }
+
+    /* Armed scale calibration (the Scale form's crosshair): a left click inside
+       the plot places the reference point - its time and the amplitude under
+       the cursor - and MainWindow prompts for the value that belongs there. Any
+       other click cancels the flow. */
+    if (app.refClickTarget == Application::RefClickTarget::WaveAmplitude)
+    {
+        const auto pr = plotRect();
+        const bool inPlot = e.x >= pr.getX() && e.x < pr.getRight()
+                            && e.y >= pr.getY() && e.y < pr.getBottom();
+        if (e.mods.isLeftButtonDown() && ! e.mods.isRightButtonDown()
+            && ! e.mods.isMiddleButtonDown() && inPlot)
+        {
+            if (const int ch = channelAtRowY (e.y); ch >= 0)
+            {
+                app.refClickT = xToTime ((double) e.x);
+                app.refClickF = ampValueAtY (e.y, ch);   // normalized amplitude there
+                app.haveRefClickPt = true;
+                repaint();
+                if (onRefClickPlaced) onRefClickPlaced (app.refClickT, app.refClickF);
+                return;
+            }
+            if (onEditError) onEditError ("Click inside a waveform row to place the reference.");
+        }
+        app.refClickTarget = Application::RefClickTarget::None;
+        app.haveRefClickPt = false;
+        repaint();
+        return;
+    }
 
     // Tables panel alignment flow: a left click is consumed as the reference
     // point in this view and reported to the panel. The second value is the
@@ -827,6 +846,10 @@ void WaveformView::paint (juce::Graphics& g)
         if (ch < (int) chanVis.size() && chanVis[ch]) ++visCount;
     const auto rows = channelRowRects (pr.getWidth(), waveH, visCount);
 
+    // The amplitude grid goes down BEFORE the waveforms: the signal covers it
+    // instead of the grid hiding a quiet signal on the zero line.
+    drawAmplitudeGrid (g, rows, {});
+
     int row = 0;
     std::vector<int> rowChans;   // channel index per visible row (per-channel scales)
     for (int ch = 0; ch < chans; ++ch)
@@ -858,8 +881,8 @@ void WaveformView::paint (juce::Graphics& g)
         // Channel label on the left of every track: "L"/"R" for stereo files,
         // channel numbers otherwise. Shown even when a single channel is
         // visible so the axis always says which track it is; red when muted.
-        g.setFont (10.0f);
-        g.setColour (muted ? juce::Colour::fromRGB (255, 80, 80) : juce::Colour::fromRGB (190, 190, 190));
+        g.setFont (13.0f);
+        g.setColour (muted ? juce::Colour::fromRGB (255, 80, 80) : juce::Colour::fromRGB (215, 215, 220));
         // Centred in a slightly wider box: never clipped by a metrics difference.
         g.drawText (channelLabel (ch), channelLabelBounds (ch, (int) center).expanded (4, 0),
                     juce::Justification::centred, false);
@@ -1389,68 +1412,85 @@ void WaveformView::updateHoverSample (int x, int y)
     repaint();
 }
 
-void WaveformView::drawAmplitudeAxis (juce::Graphics& g, const std::vector<juce::Rectangle<int>>& rows,
+// The dB levels the amplitude axis is built on: the grid lines, the labels and
+// any extra amplitude axis all use the very same positions.
+static const double kAmpTickLevels[] = { 0.0, -6.0, -12.0, -18.0, -24.0 };
+
+// Grid lines only, drawn BEFORE the waveforms so the signal covers them. Same
+// colour and weight as the dedicated tables track's grid.
+void WaveformView::drawAmplitudeGrid (juce::Graphics& g,
+                                      const std::vector<juce::Rectangle<int>>& rows,
                                       const std::vector<int>& rowChans)
 {
     const auto pr = plotRect();
-    if (pr.getHeight() <= 0 || rows.empty()) return;
+    if (pr.getHeight() <= 0 || rows.empty() || ! app.settings.showAmpGrid) return;
 
-    // dB grid levels relative to full scale (1.0). With a scale calibration the
-    // labels show physical values in the file's unit instead of dB.
-    static const double levels[] = { 0.0, -6.0, -12.0, -18.0, -24.0 };
-    const ScaleCalibration& sc = app.scale();
-
-    // Label placement follows the axis side: right-aligned against the plot
-    // edge on a left axis, left-aligned on a right one.
-    const int labX = axisOnRight() ? getWidth() - kLeftAxisWidth + 2 : 2;
-    const juce::Justification labJ = axisOnRight() ? juce::Justification::centredLeft
-                                                   : juce::Justification::centredRight;
-
+    g.setColour (sc::axes::axisGridColour());
     for (size_t r = 0; r < rows.size(); ++r)
     {
         const auto& rr = rows[r];
         const float center = pr.getY() + rr.getY() + rr.getHeight() * 0.5f;
         const float ampScale = rr.getHeight() * 0.45f * (float) vZoom;
 
-        // The grey horizontal grid lines can be hidden from the View menu;
-        // the axis labels below are unaffected. They are semi-transparent: a
-        // quiet signal draws a thin band right along the zero line, and an
-        // opaque grid line there hid the signal completely.
-        const juce::Colour gridCol = juce::Colour::fromRGBA (48, 48, 48, 150);
-        if (app.settings.showAmpGrid)
+        for (double dB : kAmpTickLevels)
         {
-            for (double dB : levels)
+            const double a = std::pow (10.0, dB / 20.0);   // amplitude at this level
+            for (int sign : { -1, +1 })
             {
-                const double a = std::pow (10.0, dB / 20.0); // amplitude at this level
-                for (int sign : { -1, +1 })
-                {
-                    // Value +a sits above the centre line, value -a below it;
-                    // both are shifted by the vertical offset.
-                    const float y = center + (float) ((vOffset - sign * a) * ampScale);
-                    if (y < pr.getY() || y > pr.getBottom()) continue;
-                    g.setColour (gridCol);
-                    g.drawHorizontalLine ((int) y, (float) pr.getX(), (float) pr.getRight());
-                }
-            }
-
-            // The zero line (-inf dB): amplitude 0 sits at centre + vOffset,
-            // so it follows the vertical pan unlike the fixed row-centre line.
-            {
-                const float y = center + (float) (vOffset * ampScale);
-                if (y >= pr.getY() && y <= pr.getBottom())
-                {
-                    g.setColour (gridCol);
-                    g.drawHorizontalLine ((int) y, (float) pr.getX(), (float) pr.getRight());
-                }
+                // Value +a sits above the centre line, value -a below it;
+                // both are shifted by the vertical offset.
+                const float y = center + (float) ((vOffset - sign * a) * ampScale);
+                if (y < pr.getY() || y > pr.getBottom()) continue;
+                g.drawHorizontalLine ((int) y, (float) pr.getX(), (float) pr.getRight());
             }
         }
+
+        // The zero line (-inf dB): amplitude 0 sits at centre + vOffset, so it
+        // follows the vertical pan unlike the fixed row-centre line.
+        const float yZero = center + (float) (vOffset * ampScale);
+        if (yZero >= pr.getY() && yZero <= pr.getBottom())
+            g.drawHorizontalLine ((int) yZero, (float) pr.getX(), (float) pr.getRight());
+    }
+}
+
+void WaveformView::drawAmplitudeAxis (juce::Graphics& g, const std::vector<juce::Rectangle<int>>& rows,
+                                      const std::vector<int>& rowChans)
+{
+    const auto pr = plotRect();
+    if (pr.getHeight() <= 0 || rows.empty()) return;
+
+    const ScaleCalibration& sc = app.scale();
+    const int axisW = this->axisW();
+
+    // Label placement follows the axis side: right-aligned against the plot
+    // edge on a left axis, left-aligned on a right one. Each axis keeps to
+    // its own strip - the extra axes used to be drawn on top of these labels.
+    const auto ampExtras = sc::axes::extras (app.axisEntries, sc::axes::Kind::Amplitude);
+    const int nAmp = 1 + (int) ampExtras.size();
+    const auto mainLab = sc::axes::verticalLabelRect (0, nAmp, axisW, pr.getX(), pr.getRight(),
+                                                      pr.getY(), pr.getBottom(), axisOnRight(),
+                                                      sc::axes::channelGutter());
+    const int labX = mainLab.getX();
+    const int labW = mainLab.getWidth();
+    const juce::Justification labJ = axisOnRight() ? juce::Justification::centredLeft
+                                                   : juce::Justification::centredRight;
+
+    struct Tick { float y; double amp; int ch; };
+    std::vector<Tick> ticks;    // main-axis positions, reused by the extra axes
+
+    for (size_t r = 0; r < rows.size(); ++r)
+    {
+        const auto& rr = rows[r];
+        const float center = pr.getY() + rr.getY() + rr.getHeight() * 0.5f;
+        const float ampScale = rr.getHeight() * 0.45f * (float) vZoom;
+        const int rowCh = (r < rowChans.size()) ? rowChans[r] : -1;
 
         // Labels only when rows are tall enough to fit them. The scale is
         // symmetric: the same dB values appear above AND below the centre line.
         if (rr.getHeight() >= 36 && rows.size() <= 4)
         {
-            g.setFont (9.0f);
-            for (double dB : levels)
+            g.setFont (sc::axes::axisLabelFont());
+            for (double dB : kAmpTickLevels)
             {
                 const double a = std::pow (10.0, dB / 20.0);
 
@@ -1460,11 +1500,10 @@ void WaveformView::drawAmplitudeAxis (juce::Graphics& g, const std::vector<juce:
                 if (yUp >= pr.getY() + 8 && yUp <= pr.getBottom()
                     && std::abs (yUp - center) >= 9.0f)
                 {
-                    g.setColour (juce::Colour::fromRGB (170, 170, 170));
-                    const int chUp = (r < rowChans.size()) ? rowChans[r] : -1;
-                    g.drawText (formatWaveVScaleLabel (dB, app.waveVScaleMode, sc, true, chUp),
-                               labX, (int) yUp - 7,
-                               kLeftAxisWidth - 4, 14, labJ, false);
+                    ticks.push_back ({ yUp, +a, rowCh });
+                    g.setColour (sc::axes::axisLabelColour());
+                    g.drawText (formatWaveVScaleLabel (dB, app.waveVScaleMode, sc, true, rowCh),
+                               labX, (int) yUp - 7, labW, 14, labJ, false);
                 }
 
                 // Lower side label (value -a below the centre line)
@@ -1472,36 +1511,60 @@ void WaveformView::drawAmplitudeAxis (juce::Graphics& g, const std::vector<juce:
                 if (yDown >= pr.getY() && yDown <= pr.getBottom() - 8
                     && std::abs (yDown - center) >= 9.0f)
                 {
-                    g.setColour (juce::Colour::fromRGB (170, 170, 170));
-                    const int chDn = (r < rowChans.size()) ? rowChans[r] : -1;
-                    g.drawText (formatWaveVScaleLabel (dB, app.waveVScaleMode, sc, false, chDn),
-                               labX, (int) yDown - 7,
-                               kLeftAxisWidth - 4, 14, labJ, false);
+                    ticks.push_back ({ yDown, -a, rowCh });
+                    g.setColour (sc::axes::axisLabelColour());
+                    g.drawText (formatWaveVScaleLabel (dB, app.waveVScaleMode, sc, false, rowCh),
+                               labX, (int) yDown - 7, labW, 14, labJ, false);
                 }
             }
 
             // Zero-line label. It hugs the plot edge like the other dB tick
             // labels (labJ); the channel name sits on the outer edge instead,
             // so at zero vertical offset nothing overlaps.
+            const float yZero = center + (float) (vOffset * ampScale);
+            if (yZero >= pr.getY() && yZero <= pr.getBottom())
             {
-                const float yZero = center + (float) (vOffset * ampScale);
-                if (yZero >= pr.getY() && yZero <= pr.getBottom())
-                {
-                    g.setColour (juce::Colour::fromRGB (170, 170, 170));
-                    g.drawText (zeroLineLabel (app.waveVScaleMode), labX, (int) yZero - 7,
-                               kLeftAxisWidth - 4, 14, labJ, false);
-                }
+                ticks.push_back ({ yZero, 0.0, rowCh });
+                g.setColour (sc::axes::axisLabelColour());
+                g.drawText (zeroLineLabel (app.waveVScaleMode), labX, (int) yZero - 7,
+                           labW, 14, labJ, false);
             }
         }
     }
 
     // Axis title
-    g.setFont (9.0f);
-    g.setColour (juce::Colour::fromRGB (150, 150, 150));
+    g.setFont (sc::axes::axisMinorLabelFont());
+    g.setColour (sc::axes::axisMinorLabelColour());
     g.drawText (waveVScaleTitle (app.waveVScaleMode, sc), labX, pr.getY() + 2,
-               kLeftAxisWidth - 4, 12,
+               axisW - 4, 12,
                axisOnRight() ? juce::Justification::centredRight
                              : juce::Justification::centredLeft, false);
+
+    // Extra amplitude axes: the same tick positions, labelled in each entry's
+    // own units, in the strips further out (the shared width already has room).
+    if (ticks.empty()) return;
+    int index = 1;
+    for (const auto& e : ampExtras)
+    {
+        const auto strip = sc::axes::verticalStrip (index, axisW, pr.getX(), pr.getRight(),
+                                                    pr.getY(), pr.getBottom(), axisOnRight());
+        if (strip.getX() < 0 || strip.getRight() > getWidth()) break;
+
+        // Secondary axis: the same smaller type the extra time axes use.
+        g.setFont (juce::Font { juce::FontOptions (8.5f) });
+        g.setColour (sc::axes::axisMinorLabelColour());
+        const auto lab = sc::axes::verticalLabelRect (index, nAmp, axisW, pr.getX(), pr.getRight(),
+                                                      pr.getY(), pr.getBottom(), axisOnRight(),
+                                                      sc::axes::channelGutter());
+        for (const auto& t : ticks)
+        {
+            const auto box = juce::Rectangle<int> (lab.getX(), (int) t.y - 7, lab.getWidth(), 14);
+            g.drawText (sc::axes::formatAmplitude (e, t.amp, t.ch), box,
+                        axisOnRight() ? juce::Justification::centredLeft
+                                      : juce::Justification::centredRight, true);
+        }
+        ++index;
+    }
 }
 
 // ---------------------------------------------------------------- time axis
@@ -1671,33 +1734,43 @@ bool parseSignedClock (const juce::String& sIn, double& outSecs)
     return true;
 }
 
-double timeToDisplayValue (double tSecs, TimeAxisMode m, double offsetSecs, double rate)
+/* Displayed value of a real time, for the axis of a given mode: every mode
+   carries the entry's offset and (optionally) its scale multiplier. */
+double timeToDisplayValue (double tSecs, TimeAxisMode m, double offsetSecs, double rate,
+                           double scale)
 {
+    const double t = tSecs + offsetSecs;
+    const double sc = (scale != 0.0 ? scale : 1.0);
     switch (m)
     {
-        case TimeAxisMode::TimeOffset: return tSecs + offsetSecs;
         case TimeAxisMode::Sample:
-            return tSecs * std::max (1.0, rate);
-        default:                       return tSecs;
+            return t * std::max (1.0, rate);
+        default:
+            return t * sc;
     }
 }
 
-juce::String formatDisplayedTime (double tSecs, TimeAxisMode m, double offsetSecs, double rate)
+juce::String formatDisplayedTime (double tSecs, TimeAxisMode m, double offsetSecs, double rate,
+                                  double scale)
 {
+    const double d = timeToDisplayValue (tSecs, m, offsetSecs, rate, scale);
     switch (m)
     {
-        case TimeAxisMode::TimeOffset:
-            return formatOffsetTime (tSecs + offsetSecs);
         case TimeAxisMode::Sample:
-            return juce::String ((int64_t) std::llround (timeToDisplayValue (tSecs, m, offsetSecs, rate)));
+            return juce::String ((int64_t) std::llround (d));
+        case TimeAxisMode::Seconds:
+            return juce::String (d, 4);
+        case TimeAxisMode::TimeOffset:
+            return formatOffsetTime (d);
         default:
-            return formatFooterTime (tSecs);
+            return formatFooterTime (d);
     }
 }
 
 bool parseDisplayedTime (const juce::String& s, TimeAxisMode m, double offsetSecs,
-                         double rate, double& outSecs)
+                         double rate, double& outSecs, double scale)
 {
+    double v = 0.0;
     switch (m)
     {
         case TimeAxisMode::Sample:
@@ -1720,27 +1793,27 @@ bool parseDisplayedTime (const juce::String& s, TimeAxisMode m, double offsetSec
                 else ++digits;
             }
             if (dots == 0 && digits == 0) { outSecs = 0.0; return false; }
-            double v = t.getDoubleValue();
-            if (!std::isfinite (v)) { outSecs = 0.0; return false; }
-            const double r = std::max (1.0, rate);
-            outSecs = (neg ? -v : v) / r;
+            double raw = t.getDoubleValue();
+            if (!std::isfinite (raw)) { outSecs = 0.0; return false; }
+            v = (neg ? -raw : raw) * (scale != 0.0 ? scale : 1.0);
+            outSecs = v / std::max (1.0, rate) - offsetSecs;
             return true;
         }
-        case TimeAxisMode::TimeOffset:
+        case TimeAxisMode::Seconds:
         {
-            double v = 0.0;
+            // Plain seconds, with or without the decimal point.
             if (!parseSignedClock (s, v)) { outSecs = 0.0; return false; }
-            outSecs = v - offsetSecs;
-            return true;
+            break;
         }
         default:
         {
-            double v = 0.0;
             if (!parseSignedClock (s, v)) { outSecs = 0.0; return false; }
-            outSecs = v;
-            return true;
+            break;
         }
     }
+
+    outSecs = v / (scale != 0.0 ? scale : 1.0) - offsetSecs;
+    return true;
 }
 
 double niceSampleStep (double samplesPerPixel)
@@ -1849,43 +1922,53 @@ void WaveformView::drawRuler (juce::Graphics& g)
     const double pxPerSec = pr.getWidth() / w;
     const TimeAxisMode mode = app.timeAxisMode;
     const double off = app.timeOffsetSecs;
+    const double sc  = (app.timeScaleFactor != 0.0 ? app.timeScaleFactor : 1.0);
     const double rate = std::max (1.0, app.audioEngine().sampleRate());
 
-    auto dispToTime = [mode, off, rate] (double d) -> double
+    auto dispToTime = [mode, off, rate, sc] (double d) -> double
     {
-        switch (mode)
-        {
-            case TimeAxisMode::Sample:     return d / rate;
-            case TimeAxisMode::TimeOffset: return d - off;
-            default:                       return d;
-        }
+        if (mode == TimeAxisMode::Sample)
+            return (d / sc) / rate - off;
+        return (d / sc) - off;
     };
 
-    const double dispStart = timeToDisplayValue (viewStart, mode, off, rate);
-    const double dispEnd   = timeToDisplayValue (viewEnd,   mode, off, rate);
+    const double dispStart = timeToDisplayValue (viewStart, mode, off, rate, sc);
+    const double dispEnd   = timeToDisplayValue (viewEnd,   mode, off, rate, sc);
+    // Pixels per DISPLAYED unit (seconds, or samples in Sample mode): the
+    // axis' scale multiplies what one second of file time contributes.
+    const double pxPerUnit = pxPerSec * sc;
     const double major = (mode == TimeAxisMode::Sample)
-                         ? niceSampleStep (rate / pxPerSec) : niceTimeStep (pxPerSec);
+                         ? niceSampleStep ((rate / pxPerSec) * sc)
+                         : niceTimeStep (pxPerUnit);
     // Subdivide each major interval into five when there is room for it.
     // (In Sample mode `major` counts samples, so convert to pixels first.)
     const double majorPx = (mode == TimeAxisMode::Sample)
-                           ? (major / rate) * pxPerSec : major * pxPerSec;
+                           ? (major / (rate * sc)) * pxPerSec : major * pxPerUnit;
     const bool showMinors = majorPx >= 40.0;
 
     // The ruler strip sits at the top by default or at the bottom when moved
-    // there via the View menu; ticks point from the plot edge into it.
-    const int rulerTop = rulerAtBottom() ? pr.getBottom() : pr.getY() - kRulerH;
+    // there via the View menu; ticks point from the plot edge into it. Extra
+    // time axes are narrower strips stacked between the main ruler and the
+    // plot, with a smaller font so the main one stays the obvious one.
+    const int stackH = app.rulerStackHeight();
+    const auto mainStrip = sc::axes::timeStrip (0, pr.getX(), pr.getWidth(),
+                                                pr.getY(), pr.getBottom(), stackH,
+                                                rulerAtBottom());
+    const int rulerTop = mainStrip.getY();
+    const int rulerHgt = mainStrip.getHeight();
     const float sepY   = rulerAtBottom() ? (float) (rulerTop + 1) : (float) (pr.getY() - 1);
     const float tickEnd   = rulerAtBottom() ? sepY + 7.0f : sepY - 7.0f;
     const float minorEnd  = rulerAtBottom() ? sepY + 3.0f : sepY - 3.0f;
 
-    g.setColour (juce::Colour::fromRGB (60, 60, 60));
+    g.setColour (sc::axes::axisGridColour());
     g.drawLine ((float) pr.getX(), sepY, (float) pr.getRight(), sepY, 1.0f);
 
     const double first = std::ceil (dispStart / major) * major;
     if (first > dispEnd + 1e-9)
         return;   // the visible span is shorter than one tick step
 
-    g.setFont (10.0f);
+    g.setFont (sc::axes::axisLabelFont());
+    std::vector<std::pair<float, double>> ticks;   // x -> real seconds
     const int nTicks = (int) std::floor ((dispEnd - first) / major + 1e-9) + 1;
     for (int i = 0; i < nTicks; ++i)
     {
@@ -1894,8 +1977,9 @@ void WaveformView::drawRuler (juce::Graphics& g)
         const double t = dispToTime (d);
         if (t < viewStart - 1e-9 || t > viewEnd + 1e-9) continue;
         const float x = timeToX (t);
+        ticks.push_back ({ x, t });
 
-        g.setColour (juce::Colour::fromRGB (60, 60, 60));
+        g.setColour (sc::axes::axisGridColour());
         g.drawLine (x, std::min (sepY, tickEnd), x, std::max (sepY, tickEnd), 1.0f);
 
         if (showMinors)
@@ -1912,12 +1996,27 @@ void WaveformView::drawRuler (juce::Graphics& g)
         switch (mode)
         {
             case TimeAxisMode::Sample:     label = juce::String ((int64_t) std::llround (d)); break;
+            case TimeAxisMode::Seconds:    label = juce::String (d, 4); break;
             case TimeAxisMode::TimeOffset: label = formatClockTime (d, 4); break;
             default:                       label = formatTimeTickLabel (d, major, w); break;
         }
 
-        g.setColour (juce::Colour::fromRGB (200, 200, 200));
-        g.drawText (label, (int) x + 3, rulerTop + 2, 90, kRulerH - 4,
+        g.setColour (sc::axes::axisLabelColour());
+        // Below the ticks when the ruler hangs under the plot (its ticks point
+        // down from the top edge); at the top of the strip otherwise.
+        const int labelY = rulerAtBottom() ? rulerTop + 9 : rulerTop + 2;
+        const int labelH = std::max (10, rulerHgt - (rulerAtBottom() ? 11 : 4));
+        g.drawText (label, (int) x + 3, labelY, 90, labelH,
                     juce::Justification::centredLeft, false);
+    }
+
+    int index = 1;
+    for (const auto& e : sc::axes::extras (app.axisEntries, sc::axes::Kind::Time))
+    {
+        const auto strip = sc::axes::timeStrip (index, pr.getX(), pr.getWidth(),
+                                                pr.getY(), pr.getBottom(), stackH,
+                                                rulerAtBottom());
+        sc::axes::drawExtraTimeAxis (g, e, strip, ticks, rate);
+        ++index;
     }
 }

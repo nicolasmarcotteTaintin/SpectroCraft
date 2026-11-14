@@ -24,6 +24,7 @@
 #include <JuceHeader.h>
 
 #include "ScrollBars.h"
+#include "SplitterStyle.h"   // the shared 6 px separator bar with its 3-line grip
 #include "VideoFrames.h"
 #include "VideoScaler.h"
 #include "FileMeta.h"
@@ -86,11 +87,9 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (juce::Colour::fromRGB (24, 26, 30));
-        g.setColour (juce::Colour::fromRGB (96, 102, 114));
-        const int cy = getHeight() / 2;
-        for (int x = getWidth() / 4; x + 3 < getWidth(); x += 8)
-            g.drawLine (x, cy, x + 3, cy);
+        // Same bar as everywhere else: three lines in the middle, not a dotted
+        // line across the whole width.
+        sc::ui::drawSplitterGrip (g, getLocalBounds().toFloat(), false);
     }
 
     juce::MouseCursor getMouseCursor() override { return juce::MouseCursor::UpDownResizeCursor; }
@@ -503,7 +502,7 @@ class VideoHostBase : public juce::Component
 {
 public:
     static constexpr int kPanelH = 20 + 4 * 26;   // ruler + four track rows (initial)
-    static constexpr int kSplitH = 6;             // separator thickness
+    static constexpr int kSplitH = sc::ui::kSplitterH;   // same thickness as every separator
 
     /** Hide/reveal the track list and its separator. */
     void setTracksCollapsed (bool c)

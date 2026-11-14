@@ -165,14 +165,20 @@ void FileListPanel::showFileMenu (int row)
     juce::PopupMenu m;
     m.addItem (1, "Activate", true, false);
     m.addItem (2, "Close", true, false);
-    m.addItem (3, "Set Unit and Scale...", true, false);
+    m.addItem (3, "Scale...", true, false);
     // Brand-new documents have no folder to open yet.
     m.addItem (4, "Open Containing Folder",
                !d.file.getFullPathName().isEmpty(), false);
     const int r = m.showMenu (juce::PopupMenu::Options().withMousePosition());
     if (r == 1) activateDoc (row);
     else if (r == 2) closeDoc (row);
-    else if (r == 3) showScaleDialog (row);
+    else if (r == 3)
+    {
+        // The Scale form is the single place for units, offsets and scales now;
+        // the old dialog stays as a fallback when no form is wired.
+        if (onScaleRequested) onScaleRequested (row);
+        else showScaleDialog (row);
+    }
     else if (r == 4) openContainingFolder (row);
 }
 
@@ -604,19 +610,32 @@ static constexpr int kHistStepColW = 36;
 void HistoryPanel::paint (juce::Graphics& g)
 {
     auto b = getLocalBounds();
-    // Same table style as the Actions panel's TableListBox under the default
-    // LookAndFeel_V4 dark scheme: body = widgetBackground RGB(38,50,56) and a
-    // header of 60% white over it (light grey) with black bold text and a
-    // half-black bottom outline.
-    g.fillAll (juce::Colour::fromRGB (38, 50, 56));
+    /* Same table style as every other table in the app: the body is the panel
+       background and the header comes from the shared LookAndFeel's table
+       header colours (the ones a TableListBox uses), not from a palette of
+       its own. */
+    auto& lf = juce::LookAndFeel::getDefaultLookAndFeel();
+    const juce::Colour headBg = lf.findColour (juce::TableHeaderComponent::backgroundColourId);
+    const juce::Colour headTx = lf.findColour (juce::TableHeaderComponent::textColourId);
+    const juce::Colour headLine = lf.findColour (juce::TableHeaderComponent::outlineColourId);
+
+    g.fillAll (juce::Colour::fromRGB (45, 45, 48));
+
+    // The list itself uses the same body colour and outline as every other
+    // table in the app (a TableListBox paints with these LookAndFeel colours).
+    const auto listAreaR = listArea ();
+    g.setColour (lf.findColour (juce::ListBox::backgroundColourId));
+    g.fillRect (listAreaR);
+    g.setColour (lf.findColour (juce::ListBox::outlineColourId));
+    g.drawRect (listAreaR, 1);
 
     // Header row with the two column titles; applied-count stays right.
-    g.setColour (juce::Colours::white.withAlpha (0.6f));
+    g.setColour (headBg);
     g.fillRect (0, 0, b.getWidth(), kHeaderH);
-    g.setColour (juce::Colours::black.withAlpha (0.5f));
+    g.setColour (headLine);
     g.fillRect (0, kHeaderH - 1, b.getWidth(), 1);
     g.setFont (juce::Font (12.0f, juce::Font::bold));
-    g.setColour (juce::Colours::black);
+    g.setColour (headTx);
     const int listX = 2;   // matches listArea()
     g.drawText ("Step", juce::Rectangle<int> (listX + 2, 3, kHistStepColW, kHeaderH - 6),
                 juce::Justification::centredRight, false);
@@ -627,12 +646,12 @@ void HistoryPanel::paint (juce::Graphics& g)
 
     const int totalActions = std::max (0, (int) rows_.size() - 1);
     g.setFont (juce::Font (11.0f, juce::Font::bold));
-    g.setColour (juce::Colours::black);
+    g.setColour (headTx);
     g.drawText (juce::String (currentState_) + " of " + juce::String (totalActions) + " applied",
                 juce::Rectangle<int> (b.getWidth() - 168, 4, 160, kHeaderH - 8),
                 juce::Justification::right, false);
 
-    const auto list = listArea();
+    const auto list = listAreaR;
     if (app.doc() == nullptr)
     {
         g.setColour (juce::Colours::grey);
@@ -661,8 +680,9 @@ void HistoryPanel::paint (juce::Graphics& g)
             g.fillRect (r);
         }
 
-        // Past rows are bright, future (redoable) ones dimmed.
-        g.setColour (rows_[(size_t) i].future ? juce::Colour::fromRGB (130, 138, 152)
+        // Past rows are bright, future (redoable) ones dimmed - the same
+        // white/lightgrey pair the marker table uses.
+        g.setColour (rows_[(size_t) i].future ? juce::Colours::lightgrey
                                                : juce::Colours::white);
 
         // Step number in its own column, action text after it.
@@ -678,7 +698,7 @@ void HistoryPanel::paint (juce::Graphics& g)
         // Time (and origin, for edits made through AI control) on the right.
         if (rows_[(size_t) i].detail.isNotEmpty() && actCol.getWidth() > 220)
         {
-            g.setColour (juce::Colour::fromRGB (150, 160, 175));
+            g.setColour (juce::Colours::lightgrey);
             g.drawText (rows_[(size_t) i].detail, actCol.withTrimmedLeft (actCol.getWidth() - 200),
                         juce::Justification::centredRight, false);
         }
@@ -2700,10 +2720,21 @@ juce::String FFTAnalysisView::buildCurveCursorInfo (int x, int y, bool& snapped,
     return info;
 }
 
-// "| Alt N=value" suffixes for every enabled alternative frequency reference.
-juce::String FFTAnalysisView::altFreqSuffix (const Application& appIn, double freqHz)
+// "| Name=value" suffixes for the frequency readouts. The Scale form's
+// "Footer Only" axes are the source; the alternative-reference list is the
+// derived view of them (Application::applyEntries), so a caller that filled
+// that list directly still gets its readouts.
+juce::String FFTAnalysisView::altFreqSuffix (Application& appIn, double freqHz)
 {
     juce::String s;
+    const double nyq = std::max (1.0, appIn.audioEngine().sampleRate() * 0.5);
+    const auto footer = sc::axes::footerOnly (appIn.axisEntries, sc::axes::Kind::Frequency);
+    if (! footer.empty())
+    {
+        for (const auto& e : footer)
+            s += "   | " + e.name + "=" + sc::axes::formatFrequency (e, freqHz, nyq);
+        return s;
+    }
     for (const auto& r : appIn.altFreqRefs)
         if (r.enabled && std::abs (r.refMain) > 1e-9)
             s += "   | " + r.name + "=" + juce::String (freqHz * r.altValue / r.refMain, 3);
@@ -11316,7 +11347,8 @@ void TablesPanel::resized()
     // List, splitter (the 6 px gap), plot.
     const int plotH = effectivePlotHeight();
     table.setBounds (6, 46, r.getWidth () - 12, std::max (0, r.getHeight () - 46 - plotH - 8));
-    splitter.setBounds (6, r.getHeight () - plotH - 8, r.getWidth () - 12, 6);
+    splitter.setBounds (6, r.getHeight () - plotH - 8, r.getWidth () - 12,
+                        sc::ui::kSplitterH);
     plot.setBounds (6, r.getHeight () - plotH - 2, r.getWidth () - 12, plotH);
 }
 
@@ -11337,11 +11369,9 @@ void TablesPanel::seekToTableTime (double tTableSecs)
 
 void TablesSplitter::paint (juce::Graphics& g)
 {
-    // A short dotted grip in the middle; the cursor says the rest.
-    g.setColour (juce::Colour::fromRGB (96, 102, 114));
-    const int cy = getHeight () / 2, cx = getWidth () / 2;
-    for (int i = -2; i <= 2; ++i)
-        g.fillRect (cx + i * 8 - 2, cy, 4, 1);
+    // Exactly the bar between the waveform and the spectrogram: same fill, same
+    // three-line grip, same thickness (see include/SplitterStyle.h).
+    sc::ui::drawSplitterGrip (g, getLocalBounds().toFloat(), false);
 }
 
 

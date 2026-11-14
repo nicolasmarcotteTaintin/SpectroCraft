@@ -8,6 +8,7 @@
 #include "ScrollBars.h"
 #include "TablesTrack.h"
 #include "Panels.h"
+#include "ScaleForm.h"   // ScaleFormWindow::PickAction in handleScalePick
 #include "Docking.h"   // Adobe-style docking workspace (panel groups, floating windows)
 #include <memory>
 #include <algorithm>
@@ -83,6 +84,8 @@ private:
     juce::TextButton* markOnly_ = nullptr;
     juce::Label* resultLabel_ = nullptr;
 };
+
+class ScaleFormWindow;   // the Scale form (include/ScaleForm.h)
 
 class MainWindow : public juce::DocumentWindow,
                    private juce::KeyListener,
@@ -213,7 +216,8 @@ public:
     }
     juce::Component* tablesSepComp()   { return tablesSep.get (); }        // unit tests
     /** Top/bottom insets (px) that keep a view's vertical scrollbar clear of its own time ruler strip. */
-    static void vScrollInsetsForView (juce::Component* view, int& topInset, int& botInset);
+    static void vScrollInsetsForView (Application& app, juce::Component* view,
+                                      int& topInset, int& botInset);
     void applyTimeWindow (double t0, double t1) override; // push one time window to BOTH views
     void refreshAfterEdit() override;   // clamp ranges, repaint waveform, re-render spectral image
     /** Applies a destructive edit (`edit` returns false and fills errOut on
@@ -332,6 +336,22 @@ public:
     /** Arms the spectrogram's reference-click flow for a scale calibration
         (Scale > Custom / Alternative Scale menu items). */
     void armRefClick (Application::RefClickTarget target);
+
+    /* A Scale form crosshair button: work out an axis entry's offset / scale
+       from the track - the playhead, a selection's ends, or a reference point
+       the user is about to click in the waveform or spectrogram. */
+    void handleScalePick (int entryIndex, ScaleFormWindow::PickAction action);
+    void applyScaleReference (int entryIndex, double mainValue, double typedValue);
+    int pendingScaleEntry = -1;   // the axis a reference click is being placed for
+    /** Opens (or raises) the Scale form for the given axis kind
+        (sc::axes::Kind): the modeless, always-on-top dialog that replaces the
+        old Scale / Alternative Scale submenus. */
+    void openScaleForm (int axisKind);
+    /** Reveal the active document's file in the file browser. */
+    void openActiveDocFolder();
+    /** Which kind a "Add Axis" in the Scale form defaults to: the axis of the
+        track whose context menu opened it. */
+    int ctxScaleKind = 1;   // sc::axes::Kind
     /** The armed flow received its reference point: prompts for the value
         and applies the resulting scale. */
     void handleRefClickPlaced (double tSecs, double fHz);
@@ -482,6 +502,8 @@ public:
         non-empty, parseable field (main axis mode or an alternative time
         reference). Ctrl+G. */
     void showGoToTimeDialog();
+    /** The Scale form, kept open while the tracks keep reacting. */
+    std::unique_ptr<ScaleFormWindow> scaleForm;
     void showNewTextDialog (double tSecs, double fHz, int px, int py);
     /** Shows every channel in both views (View > All Channels; also the
         solo-off half of the Ctrl/Shift+click and Ctrl+Shift+N toggles). */
@@ -689,6 +711,15 @@ public:
         MetaEmbedded = 7500, MetaExternal, MetaSaveOnly,   // File > Metadata submenu
         ChannelBase = 8000,    // per-channel visibility toggles: ChannelBase + index
         RecentBase = 9000,     // File > Open Recent items: RecentBase + index
+        // File > Loaded Files: the documents that are open in this session
+        // (what the Files panel used to be). DocBase + index, then three items
+        // for the active document.
+        DocBase = 9100, DocEnd = 9140,
+        DocClose = 9141, DocFolder = 9142, DocScaleForm = 9143,
+        // The same two actions from a panel header menu (right-click on the
+        // Editor's tab or its ⋯ button): ids clear of the docking ids, which
+        // are small integers.
+        PanelFolderId = 9200, PanelScaleId = 9201,
         ClearRecent = 9100,    // File > Open Recent > Clear Recent Files
         // Recording Device submenu: RecDeviceBase + pluginIndex*1000 + deviceIndex.
         // Kept above every other ID: with the old base (4500) the second
@@ -719,7 +750,6 @@ private:
     sc::WorkProgressDialog* audioInitDialog = nullptr;   // open while waiting for init
 
     // Left-side panels
-    std::unique_ptr<FileListPanel> fileListPanel;
     std::unique_ptr<FFTAnalysisView> fftPanel;
 
     // Video window: created on first use, see syncVideoWindow(). The dock host

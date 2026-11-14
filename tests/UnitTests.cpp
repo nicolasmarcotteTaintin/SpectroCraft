@@ -23,6 +23,7 @@
 #include "Panels.h"
 #include "ScrollBars.h"
 #include "MainWindow.h"
+#include "ScaleForm.h"
 #include "Resampler.h"
 #include "FFTHelpers.h"
 #include "SpectralSelection.h"
@@ -1278,30 +1279,30 @@ static void testVScrollInsets()
         int t = -1, b = -1;
 
         WaveformView wv (app);   // default: own top ruler shown
-        MainWindow::vScrollInsetsForView (&wv, t, b);
+        MainWindow::vScrollInsetsForView (app, &wv, t, b);
         CHECK (t == WaveformView::kRulerH && b == 0, "waveform + top ruler: inset at top");
 
         app.settings.trackRulerAtBottom = true;
         wv.setShowTimeRuler (true);
-        MainWindow::vScrollInsetsForView (&wv, t, b);
+        MainWindow::vScrollInsetsForView (app, &wv, t, b);
         CHECK (t == 0 && b == WaveformView::kRulerH, "waveform + bottom ruler: inset at bottom");
 
         wv.setShowTimeRuler (false);   // stacked dual view: no own strip
-        MainWindow::vScrollInsetsForView (&wv, t, b);
+        MainWindow::vScrollInsetsForView (app, &wv, t, b);
         CHECK (t == 0 && b == 0, "waveform without ruler: no inset");
 
         SpectralView sv (app);
         app.settings.trackRulerAtBottom = false;
         sv.setShowOwnTimeRuler (true);
-        MainWindow::vScrollInsetsForView (&sv, t, b);
+        MainWindow::vScrollInsetsForView (app, &sv, t, b);
         CHECK (t == SpectralView::kRulerH && b == 0, "spectral + top ruler: inset at top");
 
         app.settings.trackRulerAtBottom = true;
-        MainWindow::vScrollInsetsForView (&sv, t, b);
+        MainWindow::vScrollInsetsForView (app, &sv, t, b);
         CHECK (t == 0 && b == SpectralView::kRulerH, "spectral + bottom ruler: inset at bottom");
 
         sv.setShowOwnTimeRuler (false);
-        MainWindow::vScrollInsetsForView (&sv, t, b);
+        MainWindow::vScrollInsetsForView (app, &sv, t, b);
         CHECK (t == 0 && b == 0, "spectral without ruler: no inset");
     }
 
@@ -3713,14 +3714,13 @@ static void testLeftPanelLayout()
     const juce::StringArray defaultBottom { "Spectral Controls", "Markers",
                                             "Selection", "Drawing" };
 #endif
-    const juce::StringArray defaultTop { "Files", "Frequency Analysis", "History",
+    const juce::StringArray defaultTop { "Frequency Analysis", "History",
                                           "Actions", "Python", "Tables", "Video" };
     juce::StringArray expectBottom = defaultBottom;
     expectBottom.removeString ("Markers");
-    const juce::StringArray expectTopFinal { "Markers", "Files",
-                                             "Frequency Analysis", "History",
-                                             "Actions", "Python", "Tables",
-                                             "Video" };
+    const juce::StringArray expectTopFinal { "Frequency Analysis", "Markers",
+                                             "Tables", "History", "Actions",
+                                             "Python", "Video" };
 
     // 1) Fresh store: the default arrangement.
     {
@@ -3728,13 +3728,13 @@ static void testLeftPanelLayout()
         std::unique_ptr<MainWindow> win (new MainWindow (app, "left layout test"));
         auto& dock = win->dockManager ();
 
-        CHECK (win->panelGroupTitles ("files") == defaultTop, "default top group order");
+        CHECK (win->panelGroupTitles ("tables") == defaultTop, "default top group order");
         CHECK (win->panelGroupTitles ("controls") == defaultBottom, "default bottom group order");
         CHECK (win->panelGroupTitles ("editor") == juce::StringArray ("Editor"), "the Editor has its own group");
-        CHECK (dock.locate ("files").group->activeTab () == "fft",
+        CHECK (dock.locate ("tables").group->activeTab () == "fft",
                "Frequency Analysis is the active tab of the top group");
 
-        auto* top = dockGroupOf (dock, "files");
+        auto* top = dockGroupOf (dock, "tables");
         auto* bottom = dockGroupOf (dock, "controls");
         auto* editor = dockGroupOf (dock, "editor");
         CHECK (top != nullptr && bottom != nullptr && editor != nullptr, "the three groups have components");
@@ -3750,33 +3750,32 @@ static void testLeftPanelLayout()
                "the views live in the Editor panel");
 
         // 2) Markers to position 1 of the top group (a drop on its tab strip).
-        const auto topLoc = dock.locate ("files");
+        const auto topLoc = dock.locate ("tables");
         CHECK (dock.movePanel ("markers", *topLoc.area, topLoc.group->uid, sc::dock::Zone::tabStrip, 1),
                "move across groups accepted");
-        const juce::StringArray expectTopAfterMove { "Files", "Markers",
-                                                     "Frequency Analysis", "History",
-                                                     "Actions", "Python", "Tables",
-                                                     "Video" };
-        CHECK (win->panelGroupTitles ("files") == expectTopAfterMove, "tab moved across groups");
+        const juce::StringArray expectTopAfterMove { "Frequency Analysis",
+                                                     "Markers", "History", "Actions",
+                                                     "Python", "Tables", "Video" };
+        CHECK (win->panelGroupTitles ("tables") == expectTopAfterMove, "tab moved across groups");
         CHECK (win->panelGroupTitles ("controls") == expectBottom, "source group lost the tab");
 
-        // 3) Same-group move: Files to just before Frequency Analysis.
-        const auto loc2 = dock.locate ("files");
-        CHECK (dock.movePanel ("files", *loc2.area, loc2.group->uid, sc::dock::Zone::tabStrip, 2),
+        // 3) Same-group move: Tables to just after Markers.
+        const auto loc2 = dock.locate ("tables");
+        CHECK (dock.movePanel ("tables", *loc2.area, loc2.group->uid, sc::dock::Zone::tabStrip, 2),
                "reorder inside a group accepted");
-        CHECK (win->panelGroupTitles ("files") == expectTopFinal, "same-group move");
+        CHECK (win->panelGroupTitles ("tables") == expectTopFinal, "same-group move");
 
         // 4) View > Panels: hiding the panels maximises the Editor's group.
         win->setLeftPanelsVisible (false);
         CHECK (! win->areLeftPanelsVisible (), "panels hidden by the menu toggle");
-        CHECK (dockGroupOf (dock, "files") != nullptr && ! dockGroupOf (dock, "files")->isVisible ()
+        CHECK (dockGroupOf (dock, "tables") != nullptr && ! dockGroupOf (dock, "tables")->isVisible ()
                    && ! dockGroupOf (dock, "controls")->isVisible ()
                    && dockGroupOf (dock, "editor")->isVisible ()
                    && dockGroupOf (dock, "editor")->getBounds ().contains (
                           dock.mainArea ().getLocalBounds ().reduced (sc::dock::style::kOuterMargin)),
                "only the Editor's group shows, over the whole dock area");
         win->setLeftPanelsVisible (true);
-        CHECK (win->areLeftPanelsVisible () && dockGroupOf (dock, "files")->isVisible ()
+        CHECK (win->areLeftPanelsVisible () && dockGroupOf (dock, "tables")->isVisible ()
                    && dockGroupOf (dock, "controls")->isVisible (),
                "panels shown again");
 
@@ -3787,7 +3786,7 @@ static void testLeftPanelLayout()
     {
         Application app (store);
         std::unique_ptr<MainWindow> win (new MainWindow (app, "left layout test 2"));
-        CHECK (win->panelGroupTitles ("files") == expectTopFinal, "tab order persisted across restarts");
+        CHECK (win->panelGroupTitles ("tables") == expectTopFinal, "tab order persisted across restarts");
         CHECK (win->panelGroupTitles ("controls") == expectBottom, "group membership persisted");
         win.reset ();
     }
@@ -3809,9 +3808,9 @@ static void testCrossBarTabMove()
     store.deleteFile ();
 
 #if defined(SC_ENABLE_AI) && SC_ENABLE_AI
-    const int kNumPanels = 12;   // includes the Video tab (top group by default)
+const int kNumPanels = 11;   // includes the Video tab (top group by default)
 #else
-    const int kNumPanels = 11;
+const int kNumPanels = 10;
 #endif
 
     {
@@ -3819,43 +3818,43 @@ static void testCrossBarTabMove()
         std::unique_ptr<MainWindow> win (new MainWindow (app, "cross bar tab test"));
         auto& dock = win->dockManager ();
 
-        auto* filesPanel = win->panelForId ("files");
+        auto* filesPanel = win->panelForId ("tables");
         CHECK (filesPanel != nullptr, "test setup: probe panel exists");
-        const int topN = dock.groupTabs ("files").size ();
+        const int topN = dock.groupTabs ("tables").size ();
         const int botN = dock.groupTabs ("controls").size ();
         CHECK (topN + botN == kNumPanels, "test setup: all panels present");
 
-        // Files to the front of the bottom group.
+        // Tables to the front of the bottom group.
         const auto bl = dock.locate ("controls");
-        dock.movePanel ("files", *bl.area, bl.group->uid, sc::dock::Zone::tabStrip, 0);
+        dock.movePanel ("tables", *bl.area, bl.group->uid, sc::dock::Zone::tabStrip, 0);
         CHECK (dock.groupTabs ("fft").size () == topN - 1, "source group lost one tab");
         CHECK (dock.groupTabs ("controls").size () == botN + 1, "destination group gained one tab");
-        CHECK (dock.groupTabs ("controls")[0] == "files", "moved tab is first in the destination group");
+        CHECK (dock.groupTabs ("controls")[0] == "tables", "moved tab is first in the destination group");
 
         // The panel component itself must survive the move intact.
-        CHECK (win->panelForId ("files") == filesPanel, "panel object survived the move");
+        CHECK (win->panelForId ("tables") == filesPanel, "panel object survived the move");
         CHECK (filesPanel != nullptr && filesPanel->getParentComponent () == dockGroupOf (dock, "controls"),
                "panel now lives in the destination group");
-        CHECK (dock.locate ("files").group->activeTab () == "files", "moved tab selected in destination group");
+        CHECK (dock.locate ("tables").group->activeTab () == "tables", "moved tab selected in destination group");
         CHECK (dock.locate ("fft").group->activeTab ().isNotEmpty (), "source group keeps a selection");
 
         // Round trip back to the original arrangement.
         const auto tl = dock.locate ("fft");
-        dock.movePanel ("files", *tl.area, tl.group->uid, sc::dock::Zone::tabStrip, 0);
+        dock.movePanel ("tables", *tl.area, tl.group->uid, sc::dock::Zone::tabStrip, 0);
         CHECK (dock.groupTabs ("fft").size () == topN && dock.groupTabs ("controls").size () == botN,
                "moving the tab back restores both groups");
-        CHECK (win->isPanelOpen ("files"), "panel still open after round trip");
+        CHECK (win->isPanelOpen ("tables"), "panel still open after round trip");
 
         // Appending at the end of the other group also works.
         const auto bl2 = dock.locate ("controls");
-        dock.movePanel ("files", *bl2.area, bl2.group->uid, sc::dock::Zone::tabStrip, botN);
-        CHECK (dock.groupTabs ("controls")[botN] == "files", "append-at-end lands last");
+        dock.movePanel ("tables", *bl2.area, bl2.group->uid, sc::dock::Zone::tabStrip, botN);
+        CHECK (dock.groupTabs ("controls")[botN] == "tables", "append-at-end lands last");
         const auto tl2 = dock.locate ("fft");
-        dock.movePanel ("files", *tl2.area, tl2.group->uid, sc::dock::Zone::tabStrip, 0);
+        dock.movePanel ("tables", *tl2.area, tl2.group->uid, sc::dock::Zone::tabStrip, 0);
         win.reset ();
     }
 
-    // Simulated real drag: mouseDown on the Files tab, drag onto the first
+    // Simulated real drag: mouseDown on the Tables tab, drag onto the first
     // tab of the other group, release.
     {
         Application app2 (store);
@@ -3863,9 +3862,9 @@ static void testCrossBarTabMove()
         auto& dock = win2->dockManager ();
 
         // The tab must be visible (not in the >> menu): make it the active one.
-        const auto fl = dock.locate ("files");
+        const auto fl = dock.locate ("tables");
         dock.setActiveTab (fl.group->uid, fl.index);
-        auto* src = dockGroupOf (dock, "files");
+        auto* src = dockGroupOf (dock, "tables");
         auto* dst = dockGroupOf (dock, "controls");
         CHECK (src != nullptr && dst != nullptr && src != dst, "drag test setup: both groups found");
         if (src != nullptr && dst != nullptr)
@@ -3887,11 +3886,11 @@ static void testCrossBarTabMove()
             src->mouseUp (mkMouse (*src, target.x, target.y, {}));
 
             CHECK (! dock.isDragging (), "drag over after the release");
-            CHECK (dock.groupTabs ("controls").contains ("files")
-                       && dock.groupTabs ("controls").indexOf ("files") == t.insertIndex,
-                   "drag moved the Files tab to the other group at the caret");
-            auto* moved = win2->panelForId ("files");
-            CHECK (moved != nullptr && moved->getParentComponent () == dockGroupOf (dock, "files"),
+            CHECK (dock.groupTabs ("controls").contains ("tables")
+                       && dock.groupTabs ("controls").indexOf ("tables") == t.insertIndex,
+                   "drag moved the Tables tab to the other group at the caret");
+            auto* moved = win2->panelForId ("tables");
+            CHECK (moved != nullptr && moved->getParentComponent () == dockGroupOf (dock, "tables"),
                    "panel survived the simulated drag and lives in the destination group");
         }
         dock.flushRetired ();
@@ -3971,9 +3970,9 @@ static void testClosePanelsAndWindowMenu()
     store.deleteFile ();   // deterministic per-run name: never trust leftovers
 
 #if defined(SC_ENABLE_AI) && SC_ENABLE_AI
-    const int kNumPanels = 11;
+const int kNumPanels = 10;
 #else
-    const int kNumPanels = 10;
+const int kNumPanels = 9;
 #endif
 
     auto windowMenuIndex = [] (MainWindow& win) -> int
@@ -3990,7 +3989,7 @@ static void testClosePanelsAndWindowMenu()
         juce::MessageManager* mm = juce::MessageManager::getInstance();
         std::unique_ptr<MainWindow> win (new MainWindow (app, "close panel test"));
 
-        const bool allOpen = win->isPanelOpen ("files") && win->isPanelOpen ("fft")
+        const bool allOpen = win->isPanelOpen ("tables") && win->isPanelOpen ("fft")
             && win->isPanelOpen ("history") && win->isPanelOpen ("python")
             && win->isPanelOpen ("tables")
             && win->isPanelOpen ("controls") && win->isPanelOpen ("markers")
@@ -4026,8 +4025,8 @@ static void testClosePanelsAndWindowMenu()
         // Each Window menu entry toggles its own panel (dispatch + action).
         // Toggle back immediately so later steps see the original state.
         juce::StringArray ids;
-        ids.add ("files");   ids.add ("fft");     ids.add ("history");
-        ids.add ("actions"); ids.add ("python");  ids.add ("tables");
+        ids.add ("fft");     ids.add ("history"); ids.add ("actions");
+        ids.add ("python");  ids.add ("tables");
         ids.add ("controls");
         ids.add ("markers");
 #if defined(SC_ENABLE_AI) && SC_ENABLE_AI
@@ -4045,42 +4044,43 @@ static void testClosePanelsAndWindowMenu()
         }
 
         // 2) Closing a panel through its own right-click wiring.
-        auto* files = dynamic_cast<FileListPanel*> (win->panelForId ("files"));
-        CHECK (files != nullptr, "panelForId resolves Files");
-        if (files)
+        auto* probe = dynamic_cast<TablesPanel*> (win->panelForId ("tables"));
+        CHECK (probe != nullptr, "panelForId resolves the panel");
+        if (probe)
         {
-            files->requestClose ();
-            CHECK (!win->isPanelOpen ("files"), "Files closed via its own close action");
+            probe->requestClose ();
+            CHECK (!win->isPanelOpen ("tables"), "Tables closed via its own close action");
         }
 
-        // 3) Reopening through the Window menu lands back at index 0.
-        win->menuItemSelected (MainWindow::MenuIDs::WindowPanelBase + 0, wIdx);
-        CHECK (win->isPanelOpen ("files"), "Files reopened from the Window menu");
-        CHECK (win->panelGroupTitles ("files")[0] == "Files",
-              "reopened Files is first in its group again");
+        // 3) Reopening through the Window menu lands back at its canonical
+        //    spot in the group (Tables is the fifth tab of the default order).
+        win->menuItemSelected (MainWindow::MenuIDs::WindowPanelBase + 4, wIdx);
+        CHECK (win->isPanelOpen ("tables"), "Tables reopened from the Window menu");
+        CHECK (win->panelGroupTitles ("tables").indexOf ("Tables") == 4,
+              "reopened Tables is back at its canonical position");
 
         // 4) Canonical order restored after closing and reopening out of order.
         win->setPanelVisible ("history", false);
         win->setPanelVisible ("fft", false);
         {
-            const juce::StringArray expectTop1 { "Files", "Actions", "Python",
+            const juce::StringArray expectTop1 { "Actions", "Python",
                                                  "Tables", "Video" };
-            CHECK (win->panelGroupTitles ("files") == expectTop1,
+            CHECK (win->panelGroupTitles ("tables") == expectTop1,
                   "two panels closed from the top group");
         }
         win->setPanelVisible ("history", true);   // before fft canonically
         {
-            const juce::StringArray expectTop2 { "Files", "History", "Actions",
-                                                 "Python", "Tables", "Video" };
-            CHECK (win->panelGroupTitles ("files") == expectTop2,
+            const juce::StringArray expectTop2 { "History", "Actions", "Python",
+                                                 "Tables", "Video" };
+            CHECK (win->panelGroupTitles ("tables") == expectTop2,
                   "History reinserted at its canonical position");
         }
         win->setPanelVisible ("fft", true);
         {
-            const juce::StringArray expectTop3 { "Files", "Frequency Analysis",
-                                                 "History", "Actions", "Python",
-                                                 "Tables", "Video" };
-            CHECK (win->panelGroupTitles ("files") == expectTop3,
+            const juce::StringArray expectTop3 { "Frequency Analysis", "History",
+                                                 "Actions", "Python", "Tables",
+                                                 "Video" };
+            CHECK (win->panelGroupTitles ("tables") == expectTop3,
                   "canonical top order fully restored");
         }
 
@@ -4088,20 +4088,20 @@ static void testClosePanelsAndWindowMenu()
         auto& dock = win->dockManager ();
         CHECK (win->panelGroupTitles ("controls").contains ("Markers"), "Markers found in the bottom group");
         {
-            const auto tl = dock.locate ("files");
+            const auto tl = dock.locate ("tables");
             dock.movePanel ("markers", *tl.area, tl.group->uid, sc::dock::Zone::tabStrip, 0);
         }
-        CHECK (win->panelGroupTitles ("files")[0] == "Markers",
+        CHECK (win->panelGroupTitles ("tables")[0] == "Markers",
               "Markers moved to the top group");
         win->setPanelVisible ("markers", false);
         CHECK (!win->isPanelOpen ("markers"), "Markers closed from the top group");
-        CHECK (win->panelGroupTitles ("files")[0] == "Files",
+        CHECK (win->panelGroupTitles ("tables")[0] == "Frequency Analysis",
               "top group order after closing Markers");
 
         // 6) Closing every panel of a group removes that group; reopening one
         //    puts a group back where it was (above the bottom group).
         const int groupsBefore = (int) dock.allGroups ().size ();
-        win->setPanelVisible ("files", false);
+        win->setPanelVisible ("tables", false);
         win->setPanelVisible ("fft", false);
         win->setPanelVisible ("history", false);
         win->setPanelVisible ("actions", false);
@@ -4111,7 +4111,7 @@ static void testClosePanelsAndWindowMenu()
         CHECK ((int) dock.allGroups ().size () == groupsBefore - 1, "empty top group is removed");
         CHECK (dockGroupOf (dock, "controls") != nullptr && dockGroupOf (dock, "controls")->isVisible (),
                "bottom group still visible");
-        win->menuItemSelected (MainWindow::MenuIDs::WindowPanelBase + 1, wIdx);   // fft
+        win->menuItemSelected (MainWindow::MenuIDs::WindowPanelBase + 0, wIdx);   // fft
         {
             auto* fftGroup = dockGroupOf (dock, "fft");
             auto* ctlGroup = dockGroupOf (dock, "controls");
@@ -4121,7 +4121,7 @@ static void testClosePanelsAndWindowMenu()
                        && std::abs (fftGroup->getX () - ctlGroup->getX ()) <= 2,
                    "top group visible again, above the bottom group");
         }
-        CHECK (win->isPanelOpen ("fft") && !win->isPanelOpen ("files"),
+        CHECK (win->isPanelOpen ("fft") && !win->isPanelOpen ("tables"),
               "only Frequency Analysis reopened");
 
         win.reset ();
@@ -4133,7 +4133,7 @@ static void testClosePanelsAndWindowMenu()
         juce::MessageManager* mm = juce::MessageManager::getInstance();
         std::unique_ptr<MainWindow> win (new MainWindow (app, "close panel test 2"));
 
-        CHECK (!win->isPanelOpen ("files") && !win->isPanelOpen ("history")
+        CHECK (!win->isPanelOpen ("tables") && !win->isPanelOpen ("history")
                && !win->isPanelOpen ("markers") && !win->isPanelOpen ("python"),
               "closed panels stay closed after restart");
         {
@@ -4146,12 +4146,12 @@ static void testClosePanelsAndWindowMenu()
         CHECK (wm.getNumItems () == 2 + kNumPanels + 2 + 1 + kScControlMenuItems + 1, "Window menu still lists every panel");
 
         // Reopening a closed panel from the Window menu works after restart too.
-        win->menuItemSelected (MainWindow::MenuIDs::WindowPanelBase + 0, wIdx);   // files
-        CHECK (win->isPanelOpen ("files"), "Files reopened after restart");
+        win->menuItemSelected (MainWindow::MenuIDs::WindowPanelBase + 4, wIdx);   // tables
+        CHECK (win->isPanelOpen ("tables"), "Tables reopened after restart");
         {
-            const juce::StringArray expectTop { "Files", "Frequency Analysis" };
-            CHECK (win->panelGroupTitles ("files") == expectTop,
-                  "reopened Files first again after restart");
+            const juce::StringArray expectTop { "Frequency Analysis", "Tables" };
+            CHECK (win->panelGroupTitles ("tables") == expectTop,
+                  "reopened Tables lands after Frequency Analysis");
         }
 
         win.reset ();
@@ -8451,12 +8451,14 @@ static void testMarkerTitleClipping()
         return best;
     };
 
-    CHECK (brightAt (xA + 8, 4) > 60, "marker A title is drawn");
+    CHECK (brightAt (xA + 8, 4) > 70, "marker A title is drawn");
     // The gap between B's line and the start of B's title must be free of
-    // A's text: with the old unclipped 120 px box it overflowed into here.
-    // (Threshold above the ~48 plot background, below glyph pixels >= 71.)
-    CHECK (brightAt (xB + 2, 1) < 60, "A's title stops before marker B starts");
-    CHECK (brightAt (xB + 8, 3) > 60, "marker B title is drawn in full");
+    // A's text. The amplitude grid now crosses this band in the same solid
+    // colour as the other tracks (brightness 62), so the threshold sits above
+    // the grid and below the glyph pixels (>= 71).
+    CHECK (brightAt (xB + 2, 1) < 68,
+           "A's title stops before marker B starts: " + juce::String (brightAt (xB + 2, 1)));
+    CHECK (brightAt (xB + 8, 3) > 70, "marker B title is drawn in full");
 
     wav.deleteFile();
 }
@@ -10152,7 +10154,10 @@ static void testAltScaleMultiRef()
 
         MainWindow::GoToTimeFields f = MainWindow::computeGoToTimeFields (app);
         CHECK (f.mainId == "Time (s)", "main field id follows Time mode");
-        CHECK (f.alts.size() == 1 && f.alts[0].first == 0 && f.alts[0].second == "TRef",
+        // Only the enabled, uniquely-named reference gets a field. A reference
+        // that exists without axis entries is encoded with a negative index
+        // (-1 - list index) so the resolver inverts its scale.
+        CHECK (f.alts.size() == 1 && f.alts[0].first == -1 && f.alts[0].second == "TRef",
                "only the enabled, uniquely-named reference gets a field");
 
         app.timeAxisMode = TimeAxisMode::Sample;
@@ -10440,7 +10445,10 @@ static void testAxisScaleModes()
 
         app.timeAxisMode = TimeAxisMode::Sample;
         wv->mouseMove (mkMouse (*wv, xMid, wv->getHeight() / 2, {}));
-        const long long expectSmp = (long long) std::llround (wv->xToTime (xMid) * 8000.0);
+        // Every time-axis unit carries the axis' offset (the offset set by the
+        // previous step is still in effect): samples are counted from it too.
+        const long long expectSmp = (long long) std::llround
+            ((wv->xToTime (xMid) + app.timeOffsetSecs) * 8000.0);
         CHECK (probe.startsWith ("t=" + juce::String (expectSmp) + " smp"),
                "sample-mode probe shows a sample count: " + probe);
 
@@ -27514,15 +27522,17 @@ static void testWaveformZeroLine()
 
     app.settings.showAmpGrid = true;
     const auto pOn = centrePixel();
-    // The grid line is semi-transparent (alpha 150/255) so a flat signal is
-    // not hidden behind it: over the (60,60,60) row line it blends to ~53.
-    const int want = (int) std::lround (60.0 + (48.0 - 60.0) * (150.0 / 255.0));
-    CHECK (std::abs ((int) pOn.getRed() - want) <= 3
-           && std::abs ((int) pOn.getGreen() - want) <= 3
-           && std::abs ((int) pOn.getBlue() - want) <= 3,
-          "with grid the semi-transparent zero line is drawn at amplitude 0");
-    CHECK (pOn.getRed() > 48 && pOn.getRed() < 60,
-          "the grid line blends with what it covers instead of hiding it");
+    /* The amplitude grid is now drawn BEFORE the waveforms, in the same solid
+       colour as the other tracks' grid: it can no longer hide a quiet signal
+       on the zero line, so the centre pixel is the row line itself and
+       switching the grid on changes nothing there. */
+    CHECK (std::abs ((int) pOn.getRed() - 60) <= 2
+           && std::abs ((int) pOn.getGreen() - 60) <= 2
+           && std::abs ((int) pOn.getBlue() - 60) <= 3,
+          "with grid the zero line is still drawn at amplitude 0");
+    CHECK (std::abs ((int) pOn.getRed() - (int) pOff.getRed()) <= 2
+           && std::abs ((int) pOn.getGreen() - (int) pOff.getGreen()) <= 2,
+          "the grid sits behind the signal: it does not cover what it crosses");
 
     wav.deleteFile();
 }
@@ -28942,6 +28952,7 @@ static void testWriteDataToNewChannels()
 #include "regression/video.inc"   // Video window: picture decoding, pump, movie audio, wiring
 #include "regression/docking.inc"   // docking workspace: groups, drop zones, floating windows, workspaces
 #include "regression/diagnostics.inc"   // opt-in diagnostic log
+#include "regression/axes.inc"           // per-file axis entries behind the Scale form (docs/scale-form.md)
 #include "regression/updates.inc"       // automatic updates: Ed25519/SHA, manifest, staging (docs/updates.md)
 
 
@@ -29443,6 +29454,7 @@ static int scRunUnitTestsImpl()
     SC_RUN_TEST ("regression: audio_engine", runRegression_audio_engine);
     SC_RUN_TEST ("regression: spectral_dsp", runRegression_spectral_dsp);
     SC_RUN_TEST ("regression: views", runRegression_views);
+    SC_RUN_TEST ("regression: axes", runRegression_axes);
     SC_RUN_TEST ("regression: panels", runRegression_panels);
     SC_RUN_TEST ("regression: mainwindow", runRegression_mainwindow);
     SC_RUN_TEST ("regression: application", runRegression_application);

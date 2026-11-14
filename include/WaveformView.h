@@ -156,6 +156,12 @@ public:
     // the clicked amplitude (overlay value units) for vertical mapping.
     std::function<void(double tSecs, double value)> onAlignClick;
 
+    /* While app.refClickTarget is armed for an amplitude axis, a left click
+       inside the plot places the reference point instead of seeking: it is
+       reported as (time, clicked amplitude) so the Scale form can turn it into
+       a scale factor. The same flow the spectrogram already has. */
+    std::function<void(double tSecs, double value)> onRefClickPlaced;
+
     double getViewStart() const { return viewStart; }
     double getViewEnd() const { return viewEnd; }
     double xToTime (int x) const;
@@ -220,14 +226,23 @@ public:
     }
     bool showsMarkerTitles() const { return showMarkerTitles; }
     // Hit tests for the two chrome strips (full component height/width).
+    /** Horizontal space reserved for the vertical axes: shared with the
+        spectrogram and the dedicated tables track (the widest one wins). */
+    int axisW() const { return app.axisStripWidth(); }
+    /** Height of the time-ruler stack: the normal ruler plus one narrower
+        strip per extra visible time axis. */
+    int rulerH() const { return showTimeRuler ? app.rulerStackHeight() : 0; }
+
     bool onAxisX (int x) const
     {
-        return axisOnRight() ? x >= getWidth() - kLeftAxisWidth : x < kLeftAxisWidth;
+        const int w = axisW();
+        return axisOnRight() ? x >= getWidth() - w : x < w;
     }
     bool onRulerY (int y) const
     {
         if (!showTimeRuler) return false;
-        return rulerAtBottom() ? y >= getHeight() - kRulerH : y < kRulerH;
+        const int h = rulerH();
+        return rulerAtBottom() ? y >= getHeight() - h : y < h;
     }
 
     /** The channel whose number label (left of its row, "L"/"R" for stereo)
@@ -242,22 +257,24 @@ public:
 
     juce::Rectangle<int> plotRect() const
     {
-        // The axis strip always takes kLeftAxisWidth of horizontal space and
-        // the ruler strip kRulerH of vertical space; only their sides change
-        // with the View menu choices. When the ruler is hidden (stacked dual
-        // view), the plot fills the whole height.
-        const int x0 = axisOnRight() ? 0 : kLeftAxisWidth;
+        // The axis strip always takes axisW() of horizontal space and the
+        // ruler stack rulerH() of vertical space; only their sides change with
+        // the View menu choices. When the ruler is hidden (stacked dual view),
+        // the plot fills the whole height.
+        const int w = axisW();
+        const int rh = showTimeRuler ? app.rulerStackHeight() : 0;
+        const int x0 = axisOnRight() ? 0 : w;
         if (!showTimeRuler)
             return { x0, 0,
-                     std::max (1, getWidth() - kLeftAxisWidth),
+                     std::max (1, getWidth() - w),
                      std::max (1, getHeight()) };
         // When the ruler is at the top and a dedicated tables track sits
         // below it, that strip's height is reserved inside this view.
         const int inset = (!rulerAtBottom() && showTimeRuler) ? tablesTopInset : 0;
-        const int ruY = rulerAtBottom() ? 0 : kRulerH + inset;
+        const int ruY = rulerAtBottom() ? 0 : rh + inset;
         return { x0, ruY,
-                 std::max (1, getWidth() - kLeftAxisWidth),
-                 std::max (1, getHeight() - kRulerH - inset) };
+                 std::max (1, getWidth() - w),
+                 std::max (1, getHeight() - rh - inset) };
     }
 
     /** Reserves `px` pixels below the top time ruler for the dedicated tables
@@ -346,6 +363,10 @@ private:
     void paintChannel (juce::Graphics& g, int ch, int chanY, int chanH, float center, float amp);
     void drawTablesOverlay (juce::Graphics& g);
     void drawRuler (juce::Graphics& g);
+    /** The amplitude grid lines alone, drawn BEFORE the waveforms so they sit
+        behind the signal (the labels stay in drawAmplitudeAxis). */
+    void drawAmplitudeGrid (juce::Graphics& g, const std::vector<juce::Rectangle<int>>& rows,
+                            const std::vector<int>& rowChans);
     /** rowChans[r] = channel index displayed in row r (per-channel scales). */
     void drawAmplitudeAxis (juce::Graphics& g, const std::vector<juce::Rectangle<int>>& rows,
                             const std::vector<int>& rowChans);
@@ -399,18 +420,21 @@ juce::String formatOffsetTime (double t);
 /** Like parseTimeText but also accepts a leading +/- sign. */
 bool parseSignedClock (const juce::String& s, double& outSecs);
 
-/** Displayed value for the active time-axis mode:
-    Time -> seconds, TimeOffset -> seconds + offset, Sample -> sample count. */
-double timeToDisplayValue (double tSecs, TimeAxisMode m, double offsetSecs, double rate);
+/** Displayed value for the active time-axis mode. Every mode carries the
+    axis entry's offset; `scale` is its multiplier (1.0 when the axis is
+    unscaled). */
+double timeToDisplayValue (double tSecs, TimeAxisMode m, double offsetSecs, double rate,
+                           double scale = 1.0);
 
 /** Footer/marker text for a real time under the active axis mode. */
-juce::String formatDisplayedTime (double tSecs, TimeAxisMode m, double offsetSecs, double rate);
+juce::String formatDisplayedTime (double tSecs, TimeAxisMode m, double offsetSecs, double rate,
+                                  double scale = 1.0);
 
 /** Parse footer/marker text back to real seconds under the active axis mode.
     Sample mode accepts integer/decimal sample counts; the time modes accept
     signed plain-seconds or clock text. */
 bool parseDisplayedTime (const juce::String& s, TimeAxisMode m, double offsetSecs,
-                         double rate, double& outSecs);
+                         double rate, double& outSecs, double scale = 1.0);
 
 /** Nice 1-2-5 tick step in SAMPLES for a ruler showing `samplesPerPixel`. */
 double niceSampleStep (double samplesPerPixel);
