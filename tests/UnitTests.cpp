@@ -1826,11 +1826,19 @@ static void testHistoryPanelPaint()
 
     // Regression: the current row's highlight used to be drawn with fillAll(),
     // which painted over the whole panel and hid every earlier row + the header.
-    // Styling matches the Actions table (LookAndFeel_V4 dark scheme):
-    // body RGB(38,50,56); header = 60% white over it ~ RGB(168,173,175);
-    // current-row highlight RGB(60,80,120).
-    CHECK (colNear (290, 34, 38, 50, 56), "rows above the current one keep the dark blue-green background");
-    CHECK (colNear (150, 12, 168, 173, 175), "header area is light grey and not covered by the highlight");
+    // The body and header take the shared LookAndFeel's list / table header
+    // colours (like every other table); current-row highlight RGB(60,80,120).
+    auto& lf = juce::LookAndFeel::getDefaultLookAndFeel();
+    const juce::Colour body = juce::Colour::fromRGB (45, 45, 48)
+                                  .overlaidWith (lf.findColour (juce::ListBox::backgroundColourId));
+    const juce::Colour head = lf.findColour (juce::TableHeaderComponent::backgroundColourId);
+    CHECK (std::abs ((int) body.getRed() - 60) + std::abs ((int) body.getGreen() - 80)
+               + std::abs ((int) body.getBlue() - 120) > 48,
+           "the list background differs from the current-row highlight (the checks below mean something)");
+    CHECK (colNear (290, 34, body.getRed(), body.getGreen(), body.getBlue()),
+           "rows above the current one keep the list background");
+    CHECK (colNear (150, 12, head.getRed(), head.getGreen(), head.getBlue()),
+           "header area keeps the table header colour and is not covered by the highlight");
     CHECK (colNear (290, 74, 60, 80, 120), "current row band carries the blue highlight");
 
     // Past rows must still show bright text.
