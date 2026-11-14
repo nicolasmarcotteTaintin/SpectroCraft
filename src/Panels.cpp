@@ -10543,6 +10543,23 @@ void TablesPanel::pasteToNewTable()
         statusLabel.setText ("Import failed: " + juce::String (err), juce::dontSendNotification);
         return;
     }
+    selectNewestTable ();
+}
+
+void TablesPanel::tableFromSpectralSelection()
+{
+    std::string err;
+    if (!app.addTableFromSpectralSelection (&err))
+    {
+        statusLabel.setText ("Table from Spectral Selection: " + juce::String (err),
+                             juce::dontSendNotification);
+        return;
+    }
+    selectNewestTable ();
+}
+
+void TablesPanel::selectNewestTable()
+{
     // The new table is the last one: select it in the list and point the
     // preview at it so its plot shows without a click. addTableFromCsv has
     // already notified the panel in the app; make sure the rows are current
@@ -11161,6 +11178,9 @@ void TablesPanel::showContextMenu (int row)
 
     juce::PopupMenu m;
     m.addItem (1, "Paste to new table");
+    // Frequency Analysis > Freq vs Time (Absolute) of the spectral selection,
+    // straight into a new table: no panel, no clipboard.
+    m.addItem (9, "Table from Spectral Selection", app.hasSpectralSelection ());
     m.addSeparator ();
     m.addItem (2, "Remove Selected", nSel > 0);
     if (nSel > 0)
@@ -11226,6 +11246,7 @@ void TablesPanel::showContextMenu (int row)
     switch (id)
     {
         case 1: pasteToNewTable (); break;
+        case 9: tableFromSpectralSelection (); break;
         case 2: removeSelected (); break;
         case 3: copySelection (); break;
         case 4:
