@@ -10082,6 +10082,46 @@ static void testMultiFileSupport()
     wavB.deleteFile();
 }
 
+// Closing the active file when files follow it: activate() must not treat the
+// file that shifted into its index as the one being left (it used to save the
+// closed file's selection into it and, since #9, paint the views - still
+// bound to the destroyed file - into a tab picture).
+static void testCloseActiveMiddleFile()
+{
+    const juce::File wavs[3] = { makeTempFile ("close_mid_a.wav"), makeTempFile ("close_mid_b.wav"),
+                                 makeTempFile ("close_mid_c.wav") };
+    for (const auto& f : wavs)
+        writeWav (f, 1, 8000.0, 16000, [] (int, int64_t i, double rate)
+        { return 0.5f * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 440.0 * (double) i / rate); });
+
+    Application app;
+    for (const auto& f : wavs)
+        CHECK (app.openFile (f), "close middle: open " + f.getFileName ());
+    if (app.numDocs () != 3) return;
+    const int idC = app.docs[2]->id;
+
+    app.activate (2);
+    app.setSelection ({ 0.1, 0.2 });   // C's own selection
+    app.activate (1);
+    app.setSelection ({ 1.0, 1.5 });   // B's
+
+    int beforeChange = 0;
+    app.onBeforeActiveDocChange = [&] { ++beforeChange; };
+    app.closeFile ();                  // closes B; C shifts into index 1
+    app.onBeforeActiveDocChange = nullptr;
+
+    CHECK (app.numDocs () == 2 && beforeChange == 0,
+           "close middle: no 'doc being left' callback for a file that is already gone");
+    const FileDoc* c = nullptr;
+    for (int i = 0; i < app.numDocs (); ++i)
+        if (app.docs[(size_t) i]->id == idC) c = app.docs[(size_t) i].get ();
+    CHECK (c != nullptr && std::abs (c->selection.getStart () - 0.1) < 1e-9
+               && std::abs (c->selection.getEnd () - 0.2) < 1e-9,
+           "close middle: the next file keeps its own selection");
+
+    for (const auto& f : wavs) f.deleteFile ();
+}
+
 // ------------------------------------------------- Version auto-increment
 // Every build bumps VERSION.txt and regenerates generated/Version.h (About box)
 // plus sc_version.rc (exe file properties). This pins down that the baked-in
@@ -29666,6 +29706,7 @@ static int scRunUnitTestsImpl()
     SC_RUN_TEST ("fft view persistence", testFFTViewPersistence);
     SC_RUN_TEST ("batched undo/redo", testBatchedUndoRedo);
     SC_RUN_TEST ("multi-file support", testMultiFileSupport);
+    SC_RUN_TEST ("close active middle file", testCloseActiveMiddleFile);
     SC_RUN_TEST ("resampler (soxr)", testResampler);
     SC_RUN_TEST ("load cancel", testLoadCancel);
     SC_RUN_TEST ("large in-memory load", testLargeInMemoryLoad);

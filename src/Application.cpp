@@ -1086,7 +1086,11 @@ void Application::closeDoc (int index)
         sourcePlayer.setSource (&emptyEngine);
 
     docs.erase (docs.begin() + index);
-    if (!wasActive && activeDocIndex > index)
+    if (wasActive)
+        activeDocIndex = -1;   // the doc being left is gone: activate() below must not
+                               // save its state into, or take a picture of, the doc that
+                               // shifted into its index (the views still show the closed one)
+    else if (activeDocIndex > index)
         --activeDocIndex;   // indices shifted left of the removed doc
 
     if (!docs.empty())
